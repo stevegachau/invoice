@@ -1,5 +1,5 @@
 {
-  "name": "invoices-by-virtuals",
+  "name": "invoices-self-routing-payments",
   "private": true,
   "version": "0.0.0",
   "type": "module",

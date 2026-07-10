@@ -1,4 +1,4 @@
-# Invoices by Virtuals
+# Invoices | Self-Routing Payments
 
 A cross-chain USDC invoicing app — same engine as the original invoice demo,
 new brand and UI. Issue an invoice, get one link. Your customer sends USDC on
@@ -20,9 +20,9 @@ address automatically, gaslessly, no backend involved.
 
 ## What's new
 
-**Brand** — "Invoices by Virtuals," logo lockup built from the arrow/peak
-glyph (`src/components/Logomark.tsx`), used at real size in the header
-instead of buried in a favicon.
+**Brand** — "Invoices | Self-Routing Payments," logo lockup built from the
+arrow/peak glyph (`src/components/Logomark.tsx`), used at real size in the
+header instead of buried in a favicon.
 
 **Visual identity** — control-tower/departures-board instead of the
 original's soft SaaS look: deep graphite-navy surface, signal amber accent,
