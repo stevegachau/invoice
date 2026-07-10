@@ -108,7 +108,7 @@ export function InvoiceForm({
           <input
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
-            placeholder="Acme Inc."
+            placeholder="Loud Socks Studio"
             className="flex-1 bg-transparent py-3 text-sm text-ink placeholder:text-ink-faint outline-none"
           />
         </Field>
@@ -120,7 +120,7 @@ export function InvoiceForm({
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Q1 retainer"
+            placeholder="Podcast intro pack, batch two"
             className="flex-1 bg-transparent py-3 text-sm text-ink placeholder:text-ink-faint outline-none"
           />
         </Field>
@@ -211,7 +211,7 @@ export function InvoiceForm({
           <input
             value={payee}
             onChange={(e) => setPayee(e.target.value.trim())}
-            placeholder="0x… or vitalik.eth"
+            placeholder="0x… or yourname.eth"
             className="flex-1 bg-transparent py-3 text-sm text-ink font-mono placeholder:text-ink-faint outline-none"
           />
           {validAddress && (

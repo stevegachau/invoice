@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { RadioTower } from "lucide-react";
+import { Logomark } from "./Logomark";
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -19,7 +19,7 @@ function TopBar() {
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         <a
           href="/"
-          className="flex items-center gap-2.5 group"
+          className="flex items-center gap-3 group"
           onClick={(e) => {
             if (window.location.hash) {
               e.preventDefault();
@@ -27,11 +27,16 @@ function TopBar() {
             }
           }}
         >
-          <span className="h-7 w-7 rounded-md bg-amber-50 border border-amber-500/30 inline-flex items-center justify-center">
-            <RadioTower className="h-3.5 w-3.5 text-amber-400" />
+          <span className="transition group-hover:-translate-y-0.5">
+            <Logomark size={30} />
           </span>
-          <span className="font-display text-[15px] font-semibold tracking-tight text-ink">
-            Landfall
+          <span className="flex flex-col leading-none">
+            <span className="font-display text-[16px] font-semibold tracking-tight text-ink">
+              Invoices
+            </span>
+            <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-ink-faint">
+              by Virtuals
+            </span>
           </span>
         </a>
         <div className="hidden sm:flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-ink-faint">
@@ -48,7 +53,7 @@ function BottomBar() {
     <footer className="border-t border-line-soft">
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between text-[11px] font-mono text-ink-faint uppercase tracking-wider">
         <span>USDC · 5 gates</span>
-        <span>Landfall v1</span>
+        <span>Invoices by Virtuals</span>
       </div>
     </footer>
   );

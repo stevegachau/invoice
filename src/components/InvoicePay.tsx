@@ -421,6 +421,15 @@ function useSettlement(
   return state;
 }
 
+function EdgeNotches() {
+  return (
+    <>
+      <span className="absolute left-0 bottom-0 -translate-x-1/2 translate-y-1/2 h-5 w-5 rounded-full bg-bg" />
+      <span className="absolute right-0 bottom-0 translate-x-1/2 translate-y-1/2 h-5 w-5 rounded-full bg-bg" />
+    </>
+  );
+}
+
 function InvoiceDocument({
   issued,
   amountStr,
@@ -442,7 +451,7 @@ function InvoiceDocument({
     <article className="relative overflow-hidden rounded-2xl border border-line bg-surface">
       <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-amber-500/[0.06] via-surface to-surface" />
       <div className="absolute top-6 right-6 opacity-[0.05] text-ink font-display font-semibold text-6xl tracking-tighter pointer-events-none select-none">
-        BOARDING
+        ARRIVALS
       </div>
 
       <div className="relative px-8 pt-8 pb-6 border-b border-dashed border-line">
@@ -492,6 +501,7 @@ function InvoiceDocument({
             })}
           />
         </div>
+        <EdgeNotches />
       </div>
 
       <div className="relative px-8 py-8 grid sm:grid-cols-[1.2fr_1fr] gap-6 items-end border-b border-dashed border-line">
@@ -519,6 +529,7 @@ function InvoiceDocument({
             <GateBadge id={destChainId} size="lg" active />
           </div>
         </div>
+        <EdgeNotches />
       </div>
 
       <div className="relative px-8 py-7 border-b border-dashed border-line">
