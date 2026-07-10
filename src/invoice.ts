@@ -35,6 +35,7 @@ export type Supertx = {
 };
 
 export type IssuedInvoice = {
+  kind: "evm";
   invoice: Invoice;
   meta: InvoiceMeta;
   invoiceAddress: Address;
@@ -108,6 +109,7 @@ export async function issueInvoice(
   void ephemeralKey;
 
   return {
+    kind: "evm",
     invoice,
     meta,
     invoiceAddress,

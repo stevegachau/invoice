@@ -3,14 +3,15 @@ import { PlaneTakeoff } from "lucide-react";
 import { AppShell } from "./components/AppShell";
 import { InvoiceForm } from "./components/InvoiceForm";
 import { InvoicePay } from "./components/InvoicePay";
+import { SolanaInvoicePay } from "./components/SolanaInvoicePay";
 import { SplitFlap } from "./components/SplitFlap";
 import { gateLetter } from "./components/GateBadge";
 import { CHAINS } from "./chains";
-import type { IssuedInvoice } from "./invoice";
+import type { AnyIssuedInvoice } from "./anyInvoice";
 import { decodeInvoiceHash, encodeInvoiceHash } from "./share";
 
 export default function App() {
-  const [issued, setIssued] = useState<IssuedInvoice | null>(() =>
+  const [issued, setIssued] = useState<AnyIssuedInvoice | null>(() =>
     decodeInvoiceHash(window.location.hash),
   );
 
@@ -20,7 +21,7 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  function handleIssued(i: IssuedInvoice) {
+  function handleIssued(i: AnyIssuedInvoice) {
     window.location.hash = encodeInvoiceHash(i);
     setIssued(i);
   }
@@ -39,7 +40,11 @@ export default function App() {
   return (
     <AppShell>
       {issued ? (
-        <InvoicePay issued={issued} onBack={handleBack} />
+        issued.kind === "evm" ? (
+          <InvoicePay issued={issued} onBack={handleBack} />
+        ) : (
+          <SolanaInvoicePay issued={issued} onBack={handleBack} />
+        )
       ) : (
         <DashboardView onIssued={handleIssued} />
       )}
@@ -50,7 +55,7 @@ export default function App() {
 function DashboardView({
   onIssued,
 }: {
-  onIssued: (i: IssuedInvoice) => void;
+  onIssued: (i: AnyIssuedInvoice) => void;
 }) {
   return (
     <div className="space-y-10">

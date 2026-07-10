@@ -12,30 +12,35 @@ import {
   User,
 } from "lucide-react";
 import { CHAINS, CHAIN_LABEL, type SupportedChainId } from "../chains";
-import {
-  issueInvoice,
-  type Invoice,
-  type IssuedInvoice,
-} from "../invoice";
-import { GateDot, gateLetter } from "./GateBadge";
+import { issueInvoice, type Invoice } from "../invoice";
+import { issueSolanaInvoice } from "../solanaInvoice";
+import { isValidSolanaPubkey } from "../solana";
+import type { AnyIssuedInvoice } from "../anyInvoice";
+import { GateDot, gateLetter, SOLANA_GATE_ID, type GateId } from "./GateBadge";
 
-export type { IssuedInvoice } from "../invoice";
+export type { AnyIssuedInvoice } from "../anyInvoice";
+
+const GATES: GateId[] = [...CHAINS.map((c) => c.id), SOLANA_GATE_ID];
+
+function gateLabel(id: GateId): string {
+  return id === SOLANA_GATE_ID ? "Solana" : CHAIN_LABEL[id as SupportedChainId];
+}
 
 export function InvoiceForm({
   onIssued,
 }: {
-  onIssued: (i: IssuedInvoice) => void;
+  onIssued: (i: AnyIssuedInvoice) => void;
 }) {
   const [companyName, setCompanyName] = useState("");
   const [description, setDescription] = useState("");
-  const [destinationChainId, setDestinationChainId] =
-    useState<SupportedChainId>(CHAINS[3].id);
+  const [destination, setDestination] = useState<GateId>(CHAINS[3].id);
   const [payee, setPayee] = useState("");
   const [amount, setAmount] = useState("25");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const validAddress = isAddress(payee);
+  const isSolana = destination === SOLANA_GATE_ID;
+  const validAddress = isSolana ? isValidSolanaPubkey(payee) : isAddress(payee);
   const validAmount = (() => {
     const n = Number(amount);
     return Number.isFinite(n) && n > 0;
@@ -56,19 +61,27 @@ export function InvoiceForm({
     setBusy(true);
     setError(null);
     try {
-      const invoice: Invoice = {
-        payeeAddress: payee as Address,
-        destinationChainId,
-        amount: parseUnits(amount, 6),
+      const meta = {
+        companyName: companyName.trim(),
+        description: description.trim(),
       };
-      const issued = await issueInvoice(
-        invoice,
-        {
-          companyName: companyName.trim(),
-          description: description.trim(),
-        },
-        apiKey,
-      );
+
+      const issued: AnyIssuedInvoice = isSolana
+        ? await issueSolanaInvoice(
+            { payeeSolanaAddress: payee, amount: parseUnits(amount, 6) },
+            meta,
+            apiKey,
+          )
+        : await issueInvoice(
+            {
+              payeeAddress: payee as Address,
+              destinationChainId: destination as SupportedChainId,
+              amount: parseUnits(amount, 6),
+            } satisfies Invoice,
+            meta,
+            apiKey,
+          );
+
       onIssued(issued);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -157,7 +170,7 @@ export function InvoiceForm({
         </div>
       </section>
 
-      {/* Destination chain */}
+      {/* Destination gate */}
       <section className="px-7 pt-6">
         <div className="flex items-center justify-between">
           <Label>Settle at gate</Label>
@@ -165,14 +178,17 @@ export function InvoiceForm({
             Where you receive the funds
           </span>
         </div>
-        <div className="mt-2 grid grid-cols-2 sm:grid-cols-5 gap-2">
-          {CHAINS.map((c) => {
-            const selected = c.id === destinationChainId;
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {GATES.map((id) => {
+            const selected = id === destination;
             return (
               <button
-                key={c.id}
+                key={id}
                 type="button"
-                onClick={() => setDestinationChainId(c.id)}
+                onClick={() => {
+                  setDestination(id);
+                  setPayee("");
+                }}
                 className={
                   "group relative rounded-lg border px-3 py-3 text-sm transition flex flex-col items-center justify-center gap-1 " +
                   (selected
@@ -181,11 +197,11 @@ export function InvoiceForm({
                 }
               >
                 <span className="text-[9px] font-mono uppercase tracking-widest text-ink-faint">
-                  Gate {gateLetter(c.id)}
+                  Gate {gateLetter(id)}
                 </span>
                 <span className="inline-flex items-center gap-1.5 font-medium">
-                  <GateDot id={c.id} />
-                  {CHAIN_LABEL[c.id]}
+                  <GateDot id={id} />
+                  {gateLabel(id)}
                 </span>
                 {selected && (
                   <CheckCircle2 className="h-3.5 w-3.5 text-amber-400 absolute top-1.5 right-1.5" />
@@ -194,11 +210,18 @@ export function InvoiceForm({
             );
           })}
         </div>
+        {isSolana && (
+          <p className="mt-2 text-[11px] text-ink-faint leading-relaxed">
+            Payer still sends from any of the 5 EVM gates — Solana is a
+            settlement destination, funds bridge straight to the payee's
+            Solana wallet.
+          </p>
+        )}
       </section>
 
       {/* Payee */}
       <section className="px-7 pt-6">
-        <Label>Payee address</Label>
+        <Label>{isSolana ? "Payee Solana address" : "Payee address"}</Label>
         <div
           className={
             "mt-2 flex items-center gap-3 rounded-lg border bg-bg pl-4 pr-2 transition " +
@@ -211,7 +234,9 @@ export function InvoiceForm({
           <input
             value={payee}
             onChange={(e) => setPayee(e.target.value.trim())}
-            placeholder="0x… or yourname.eth"
+            placeholder={
+              isSolana ? "Solana wallet address (base58)" : "0x… or yourname.eth"
+            }
             className="flex-1 bg-transparent py-3 text-sm text-ink font-mono placeholder:text-ink-faint outline-none"
           />
           {validAddress && (
@@ -224,7 +249,7 @@ export function InvoiceForm({
         {payee && !validAddress && (
           <p className="mt-1.5 text-xs text-red-400 inline-flex items-center gap-1">
             <AlertCircle className="h-3 w-3" />
-            Not a valid address
+            {isSolana ? "Not a valid Solana address" : "Not a valid address"}
           </p>
         )}
       </section>
@@ -236,8 +261,8 @@ export function InvoiceForm({
           <SummaryRow label="Amount" value={`${formattedAmount} USDC`} />
           <SummaryRow
             label="Settles at"
-            value={`Gate ${gateLetter(destinationChainId)} · ${CHAIN_LABEL[destinationChainId]}`}
-            tag={<GateDot id={destinationChainId} />}
+            value={`Gate ${gateLetter(destination)} · ${gateLabel(destination)}`}
+            tag={<GateDot id={destination} />}
           />
           <SummaryRow label="Network fee" value="Sponsored" accent="green" />
         </div>
@@ -259,7 +284,9 @@ export function InvoiceForm({
           {busy ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              Signing supertx across 5 gates…
+              {isSolana
+                ? "Signing supertx to Solana…"
+                : "Signing supertx across 5 gates…"}
             </>
           ) : (
             <>
@@ -269,8 +296,9 @@ export function InvoiceForm({
           )}
         </button>
         <p className="mt-3 text-[11px] text-center text-ink-faint">
-          We pre-sign one supertx spanning all 5 gates. Whichever the payer
-          uses fires automatically — it expires after 24h.
+          {isSolana
+            ? "We pre-sign one supertx bridging directly to the Solana address from any of the 5 EVM gates — it expires after 24h."
+            : "We pre-sign one supertx spanning all 5 gates. Whichever the payer uses fires automatically — it expires after 24h."}
         </p>
       </footer>
     </form>
