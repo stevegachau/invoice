@@ -1,13 +1,15 @@
 import type { Address } from "viem";
-import type { AnyIssuedInvoice } from "./anyInvoice";
-import type { SupportedChainId } from "./chains";
+import type { IssuedInvoice } from "./invoice";
+import type { Destination, RelayResult } from "./relayApi";
 
 const HASH_PREFIX = "i=";
-const VERSION = 5; // bumped: solana invoices now carry an array of per-chain supertxs, not one
+const VERSION = 6; // bumped: dropped the whole MEE/Across supertx model —
+// invoices are now just {invoiceId, destination, amount}, backed by the
+// relay Cloud Function instead of pre-signed supertransactions.
 
-type WireCommon = {
+type Wire = {
   v: number;
-  k: "evm" | "solana";
+  id: string; // invoiceId
   addr: Address;
   n: string;
   t: number;
@@ -15,71 +17,36 @@ type WireCommon = {
   co: string;
   d: string;
   a: string;
+  dest: Destination;
+  // Cached relay result, if we have one — lets reopening the link show
+  // "complete" immediately without re-scanning from scratch. Optional:
+  // absence just means the settlement hook re-derives it live.
+  relay?: RelayResult;
 };
 
-type WireSupertx = {
-  h?: `0x${string}`;
-  ms?: string;
-  mf?: string; // meeFeeAmount, stringified bigint
-  e?: string;
-};
-
-type WireEvm = WireCommon & {
-  k: "evm";
-  p: Address;
-  c: SupportedChainId;
-} & WireSupertx;
-
-type WireSolana = WireCommon & {
-  k: "solana";
-  p: string; // base58 Solana address
-  sx: (WireSupertx & { c: SupportedChainId })[]; // one per origin chain
-};
-
-type Wire = WireEvm | WireSolana;
-
-export function encodeInvoiceHash(i: AnyIssuedInvoice): string {
-  const common: WireCommon = {
+export function encodeInvoiceHash(
+  issued: IssuedInvoice,
+  relay?: RelayResult,
+): string {
+  const wire: Wire = {
     v: VERSION,
-    k: i.kind,
-    addr: i.invoiceAddress,
-    n: i.invoiceNumber,
-    t: i.issuedAt,
-    exp: i.expiresAt,
-    co: i.meta.companyName,
-    d: i.meta.description,
-    a: i.invoice.amount.toString(),
+    id: issued.invoiceId,
+    addr: issued.invoiceAddress,
+    n: issued.invoiceNumber,
+    t: issued.issuedAt,
+    exp: issued.expiresAt,
+    co: issued.meta.companyName,
+    d: issued.meta.description,
+    a: issued.invoice.amount.toString(),
+    dest: issued.invoice.destination,
+    relay,
   };
-
-  const wire: Wire =
-    i.kind === "evm"
-      ? {
-          ...common,
-          k: "evm",
-          p: i.invoice.payeeAddress,
-          c: i.invoice.destinationChainId,
-          h: i.supertx.hash,
-          ms: i.supertx.meeScanLink,
-          mf: i.supertx.meeFeeAmount?.toString(),
-          e: i.supertx.error,
-        }
-      : {
-          ...common,
-          k: "solana",
-          p: i.invoice.payeeSolanaAddress,
-          sx: i.supertxs.map((s) => ({
-            c: s.chainId,
-            h: s.hash,
-            ms: s.meeScanLink,
-            mf: s.meeFeeAmount?.toString(),
-            e: s.error,
-          })),
-        };
-
-  return HASH_PREFIX + toBase64Url(JSON.stringify(wire));
+  return HASH_PREFIX + toBase64Url(JSON.stringify(wire, bigIntReplacer));
 }
 
-export function decodeInvoiceHash(hash: string): AnyIssuedInvoice | null {
+export function decodeInvoiceHash(
+  hash: string,
+): { issued: IssuedInvoice; relay?: RelayResult } | null {
   const raw = hash.startsWith("#") ? hash.slice(1) : hash;
   if (!raw.startsWith(HASH_PREFIX)) return null;
   try {
@@ -87,56 +54,28 @@ export function decodeInvoiceHash(hash: string): AnyIssuedInvoice | null {
     const w = JSON.parse(json) as Wire;
     if (w.v !== VERSION) return null;
 
-    const meta = { companyName: w.co, description: w.d };
-    const base = {
+    const issued: IssuedInvoice = {
+      invoiceId: w.id,
       invoiceAddress: w.addr,
       invoiceNumber: w.n,
       issuedAt: w.t,
       expiresAt: w.exp,
-      meta,
+      meta: { companyName: w.co, description: w.d },
+      invoice: { destination: w.dest, amount: BigInt(w.a) },
     };
-
-    if (w.k === "evm") {
-      return {
-        kind: "evm",
-        ...base,
-        invoice: {
-          payeeAddress: w.p,
-          destinationChainId: w.c,
-          amount: BigInt(w.a),
-        },
-        supertx: {
-          hash: w.h,
-          meeScanLink: w.ms,
-          meeFeeAmount: w.mf !== undefined ? BigInt(w.mf) : undefined,
-          error: w.e,
-        },
-      };
-    }
-
-    return {
-      kind: "solana",
-      ...base,
-      invoice: {
-        payeeSolanaAddress: w.p,
-        amount: BigInt(w.a),
-      },
-      supertxs: w.sx.map((s) => ({
-        chainId: s.c,
-        hash: s.h,
-        meeScanLink: s.ms,
-        meeFeeAmount: s.mf !== undefined ? BigInt(s.mf) : undefined,
-        error: s.e,
-      })),
-    };
+    return { issued, relay: w.relay };
   } catch {
     return null;
   }
 }
 
-export function buildShareUrl(i: AnyIssuedInvoice): string {
+export function buildShareUrl(issued: IssuedInvoice, relay?: RelayResult): string {
   const { origin, pathname } = window.location;
-  return `${origin}${pathname}#${encodeInvoiceHash(i)}`;
+  return `${origin}${pathname}#${encodeInvoiceHash(issued, relay)}`;
+}
+
+function bigIntReplacer(_key: string, value: unknown) {
+  return typeof value === "bigint" ? value.toString() : value;
 }
 
 function toBase64Url(s: string): string {

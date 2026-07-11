@@ -3,48 +3,45 @@ import { PlaneTakeoff } from "lucide-react";
 import { AppShell } from "./components/AppShell";
 import { InvoiceForm } from "./components/InvoiceForm";
 import { InvoicePay } from "./components/InvoicePay";
-import { SolanaInvoicePay } from "./components/SolanaInvoicePay";
 import { SplitFlap } from "./components/SplitFlap";
 import { gateLetter } from "./components/GateBadge";
 import { CHAINS } from "./chains";
-import type { AnyIssuedInvoice } from "./anyInvoice";
+import type { IssuedInvoice } from "./invoice";
+import type { RelayResult } from "./relayApi";
 import { decodeInvoiceHash, encodeInvoiceHash } from "./share";
 
 export default function App() {
-  const [issued, setIssued] = useState<AnyIssuedInvoice | null>(() =>
-    decodeInvoiceHash(window.location.hash),
-  );
+  const [decoded, setDecoded] = useState<{
+    issued: IssuedInvoice;
+    relay?: RelayResult;
+  } | null>(() => decodeInvoiceHash(window.location.hash));
 
   useEffect(() => {
-    const onHash = () => setIssued(decodeInvoiceHash(window.location.hash));
+    const onHash = () => setDecoded(decodeInvoiceHash(window.location.hash));
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  function handleIssued(i: AnyIssuedInvoice) {
-    window.location.hash = encodeInvoiceHash(i);
-    setIssued(i);
+  function handleIssued(issued: IssuedInvoice) {
+    window.location.hash = encodeInvoiceHash(issued);
+    setDecoded({ issued });
   }
 
   function handleBack() {
     if (window.location.hash) {
-      history.pushState(
-        null,
-        "",
-        window.location.pathname + window.location.search,
-      );
+      history.pushState(null, "", window.location.pathname + window.location.search);
     }
-    setIssued(null);
+    setDecoded(null);
   }
 
   return (
     <AppShell>
-      {issued ? (
-        issued.kind === "evm" ? (
-          <InvoicePay issued={issued} onBack={handleBack} />
-        ) : (
-          <SolanaInvoicePay issued={issued} onBack={handleBack} />
-        )
+      {decoded ? (
+        <InvoicePay
+          issued={decoded.issued}
+          cachedRelay={decoded.relay}
+          onBack={handleBack}
+        />
       ) : (
         <DashboardView onIssued={handleIssued} />
       )}
@@ -52,11 +49,7 @@ export default function App() {
   );
 }
 
-function DashboardView({
-  onIssued,
-}: {
-  onIssued: (i: AnyIssuedInvoice) => void;
-}) {
+function DashboardView({ onIssued }: { onIssued: (i: IssuedInvoice) => void }) {
   return (
     <div className="space-y-10">
       <Hero />
@@ -91,8 +84,9 @@ function Hero() {
       </h1>
       <p className="mt-3 text-ink-dim text-[15px] leading-relaxed">
         Issue an invoice, get one link. Your customer sends USDC through
-        whichever chain they're holding it on — we pre-sign the route across all five gates and forwards it, gaslessly,
-        the moment it touches down.
+        whichever chain they're holding it on — we pre-sign nothing and
+        pay no gas ourselves, and it forwards automatically the moment it
+        touches down.
       </p>
     </section>
   );
@@ -105,12 +99,12 @@ function RoutePlan() {
       body: "Company, description, amount, and where you want paid out.",
     },
     {
-      title: "One link, five gates open",
-      body: "We mint an ephemeral address and pre-sign a route from every chain.",
+      title: "One address, three gates",
+      body: "A single deterministic address, live on Base, Arbitrum, and Polygon at once.",
     },
     {
       title: "Touchdown, then forwarding",
-      body: "USDC lands anywhere — it's bridged and forwarded to you, automatically.",
+      body: "USDC lands anywhere — it's forwarded to you automatically, gaslessly.",
     },
   ];
   return (
@@ -139,7 +133,7 @@ function RoutePlan() {
       </ol>
       <div className="mt-1 pt-4 border-t border-dashed border-line flex items-center gap-2 text-[11px] text-ink-faint">
         <PlaneTakeoff className="h-3.5 w-3.5 text-amber-500/70" />
-        Expires 24h after filing — unused routes just lapse.
+        No expiry — pay whenever you're ready.
       </div>
     </aside>
   );

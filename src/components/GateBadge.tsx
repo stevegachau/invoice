@@ -1,16 +1,14 @@
-import { mainnet, arbitrum, optimism, base, polygon } from "viem/chains";
+import { base, arbitrum, polygon } from "viem/chains";
 import type { SupportedChainId } from "../chains";
 
 export const SOLANA_GATE_ID = "solana" as const;
 export type GateId = SupportedChainId | typeof SOLANA_GATE_ID;
 
 const CHAIN_THEME: Record<GateId, { dot: string; abbr: string; gate: string }> = {
-  [mainnet.id]: { dot: "#8ca0f5", abbr: "Eth", gate: "A" },
+  [base.id]: { dot: "#5b8cff", abbr: "Base", gate: "A" },
   [arbitrum.id]: { dot: "#57b7f5", abbr: "Arb", gate: "B" },
-  [optimism.id]: { dot: "#ff6b6b", abbr: "Opt", gate: "C" },
-  [base.id]: { dot: "#5b8cff", abbr: "Base", gate: "D" },
-  [polygon.id]: { dot: "#b18aff", abbr: "Pol", gate: "E" },
-  [SOLANA_GATE_ID]: { dot: "#14f195", abbr: "Sol", gate: "F" },
+  [polygon.id]: { dot: "#b18aff", abbr: "Pol", gate: "C" },
+  [SOLANA_GATE_ID]: { dot: "#14f195", abbr: "Sol", gate: "D" },
 };
 
 export function gateLetter(id: GateId): string {
