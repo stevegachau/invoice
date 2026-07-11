@@ -131,7 +131,8 @@
     <h2>Create an invoice link</h2>
     <h3><span class="method">POST</span> /</h3>
     <p class="desc">
-      Generates an invoice url exactly like the web form does.
+      Generates an invoice exactly like the web form does — a random invoice ID, a deterministic
+      deposit address derived from it, and a share URL that opens directly in the app.
     </p>
 
     <table class="field-table">
@@ -166,7 +167,7 @@
     "companyName": "Loud Socks Studio",
     "description": "Podcast intro pack",
     "amount": "25",
-    "destination": { "type": "evm", "chainId": 8453, "address": "0x22103b263B430202676CDC9d42C3980C2b0Cc78F" }
+    "destination": { "type": "evm", "chainId": 8453, "address": "0x1Cc1BD36202546E57B5337a8ba9BcC3Df815D3Cc" }
   }'</span></pre>
 
     <p class="desc"><strong style="color:var(--ink)">Response</strong></p>

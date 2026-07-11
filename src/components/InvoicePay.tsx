@@ -18,13 +18,14 @@ import {
   ShieldCheck,
   Timer,
 } from "lucide-react";
-import { CHAINS, CHAIN_LABEL, type SupportedChainId } from "../chains";
+import { CHAINS, CHAIN_LABEL, USDC, type SupportedChainId } from "../chains";
 import type { IssuedInvoice } from "../invoice";
 import type { Destination, RelayResult } from "../relayApi";
 import { GateDot, GateBadge, gateLetter, SOLANA_GATE_ID, type GateId } from "./GateBadge";
 import { SplitFlap } from "./SplitFlap";
 import { buildShareUrl, encodeInvoiceHash } from "../share";
 import { useInvoiceSettlement } from "../useInvoiceSettlement";
+import { useIsCoarsePointer } from "../useIsMobileWallet";
 
 export function InvoicePay({
   issued,
@@ -186,6 +187,7 @@ function InvoiceDocument({
 }) {
   const destination = issued.invoice.destination;
   const payeeDisplay = destination.address;
+  const isMobile = useIsCoarsePointer();
 
   return (
     <article className="relative overflow-hidden rounded-2xl border border-line bg-surface">
@@ -357,14 +359,23 @@ function InvoiceDocument({
           <div className="relative px-8 py-7">
             <div className="flex items-center justify-between mb-3">
               <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-                Open gates
+                {isMobile ? "Open gates · tap to pay from your wallet" : "Open gates"}
               </div>
               <div className="text-[11px] text-ink-faint">USDC only</div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {CHAINS.map((c) => (
-                <GateBadge key={c.id} id={c.id} />
-              ))}
+              {CHAINS.map((c) =>
+                isMobile ? (
+                  <a
+                    key={c.id}
+                    href={buildErc681Link(c.id, issued.invoiceAddress, issued.invoice.amount)}
+                  >
+                    <GateBadge id={c.id} />
+                  </a>
+                ) : (
+                  <GateBadge key={c.id} id={c.id} />
+                ),
+              )}
             </div>
           </div>
         </>
@@ -647,6 +658,15 @@ function Meta({
       </div>
     </div>
   );
+}
+
+// ERC-681: ethereum:<token contract>@<chainId>/transfer?address=<recipient>&uint256=<amount>
+// USDC is an ERC-20, so the URI targets the token contract's transfer()
+// function, not the recipient directly. Wallet support for this exact
+// form varies — well-supported in MetaMask mobile, but some wallets only
+// handle the plain native-currency variant and may ignore this.
+function buildErc681Link(chainId: SupportedChainId, recipient: string, amount: bigint): string {
+  return `ethereum:${USDC[chainId]}@${chainId}/transfer?address=${recipient}&uint256=${amount.toString()}`;
 }
 
 function short(s: string) {
