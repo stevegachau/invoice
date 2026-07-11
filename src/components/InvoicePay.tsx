@@ -239,7 +239,12 @@ function InvoiceDocument({
         </div>
       </div>
 
-      <div className="relative px-8 py-8 grid sm:grid-cols-[1.2fr_1fr] gap-6 items-end border-b border-dashed border-line">
+      <div
+        className={
+          "relative px-8 py-8 border-b border-dashed border-line items-end " +
+          (originGateId !== undefined ? "" : "grid sm:grid-cols-[1.2fr_1fr] gap-6")
+        }
+      >
         <div>
           <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
             Amount due
@@ -252,32 +257,38 @@ function InvoiceDocument({
             <span className="ml-1 text-sm font-medium text-ink-dim">USDC</span>
           </div>
         </div>
-        <div className="sm:text-right">
-          <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-            Destination
+        {originGateId === undefined && (
+          <div className="sm:text-right">
+            <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
+              Destination
+            </div>
+            <div className="mt-2 inline-flex">
+              <GateBadge id={destGateId} size="lg" active />
+            </div>
           </div>
-          <div className="mt-2 inline-flex">
-            <GateBadge id={destGateId} size="lg" active />
-          </div>
-        </div>
+        )}
         <EdgeNotches />
       </div>
 
       {originGateId !== undefined && (
         <div className="relative px-8 py-6 border-b border-dashed border-line">
-          <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint mb-3">
-            Route
-          </div>
-          <div className="flex items-center gap-3">
-            <GateBadge id={originGateId} size="lg" tone="origin" active />
-            <div className="relative flex-1 h-5 min-w-[48px]">
-              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-dashed border-line" />
-              <Plane
-                aria-hidden
-                className="route-plane h-3.5 w-3.5 text-[#5b8cff] -rotate-45"
-              />
+          <div className="flex items-end gap-3">
+            <div className="flex flex-col items-start gap-2">
+              <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
+                Origin
+              </div>
+              <GateBadge id={originGateId} size="lg" tone="origin" active />
             </div>
-            <GateBadge id={destGateId} size="lg" active />
+            <div className="relative flex-1 h-10 min-w-[48px]">
+              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-dashed border-line" />
+              <Plane aria-hidden className="route-plane h-3.5 w-3.5 text-[#5b8cff]" />
+            </div>
+            <div className="flex flex-col items-start gap-2">
+              <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
+                Destination
+              </div>
+              <GateBadge id={destGateId} size="lg" active />
+            </div>
           </div>
         </div>
       )}

@@ -58,15 +58,20 @@ function BottomBar() {
           <span className="h-1.5 w-1.5 rounded-full bg-green-500 pulse-dot" />
           All systems operational
         </span>
-        <a
-          href="https://x.com/invoiceswtf"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Invoices on X"
-          className="text-ink-faint hover:text-ink transition"
-        >
-          <XLogo className="h-3.5 w-3.5" />
-        </a>
+        <div className="flex items-center gap-4">
+          <a href="/api" className="text-ink-faint hover:text-ink transition normal-case">
+            API
+          </a>
+          <a
+            href="https://x.com/invoiceswtf"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Invoices on X"
+            className="text-ink-faint hover:text-ink transition"
+          >
+            <XLogo className="h-3.5 w-3.5" />
+          </a>
+        </div>
       </div>
     </footer>
   );

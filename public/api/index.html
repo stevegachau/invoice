@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>API — Invoices | Self-Routing Payments</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<style>
+  :root {
+    --bg: #0b0f16;
+    --surface: #121826;
+    --surface-2: #1a2233;
+    --line: #262f42;
+    --ink: #eef1f8;
+    --ink-dim: #aab3c5;
+    --ink-faint: #6b7386;
+    --amber: #ffb020;
+    --green: #35d488;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.6;
+  }
+  code, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 56px 24px 96px; }
+
+  a { color: var(--amber); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header.page { margin-bottom: 40px; }
+  header.page a.back {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--ink-dim); margin-bottom: 20px;
+  }
+  h1 {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 28px; font-weight: 600; margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  header.page p { color: var(--ink-dim); margin: 0; font-size: 15px; }
+
+  .base-url {
+    margin-top: 20px;
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--surface-2); border: 1px dashed var(--line);
+    border-radius: 8px; padding: 10px 16px;
+    font-size: 14px;
+  }
+  .base-url .label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ink-faint);
+  }
+
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--ink-faint); font-weight: 600;
+    margin: 48px 0 16px; padding-top: 24px; border-top: 1px dashed var(--line);
+  }
+  section:first-of-type h2 { border-top: none; padding-top: 0; }
+
+  h3 {
+    font-size: 16px; color: var(--ink); margin: 0 0 6px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .method {
+    font-size: 11px; font-family: "IBM Plex Mono", monospace;
+    background: rgba(53, 212, 136, 0.12); color: var(--green);
+    border: 1px solid rgba(53, 212, 136, 0.3);
+    padding: 2px 8px; border-radius: 4px;
+  }
+  p.desc { color: var(--ink-dim); font-size: 14px; margin: 0 0 16px; }
+
+  .field-table {
+    width: 100%; border-collapse: collapse; font-size: 13px; margin: 16px 0;
+  }
+  .field-table th {
+    text-align: left; color: var(--ink-faint); font-weight: 500;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line);
+  }
+  .field-table td {
+    padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line);
+    vertical-align: top; color: var(--ink-dim);
+  }
+  .field-table td.name { color: var(--ink); font-family: "IBM Plex Mono", monospace; }
+  .field-table .req { color: var(--amber); font-size: 11px; }
+  .field-table .opt { color: var(--ink-faint); font-size: 11px; }
+
+  pre {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px 18px; overflow-x: auto;
+    font-size: 12.5px; line-height: 1.55; color: var(--ink);
+  }
+  pre .k { color: #8ca9ff; }
+  pre .s { color: #7ee8b8; }
+  pre .n { color: var(--amber); }
+  pre .c { color: var(--ink-faint); }
+
+  ul.chains { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-wrap: wrap; gap: 8px; }
+  ul.chains li {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 10px; color: var(--ink-dim);
+  }
+
+  footer.page {
+    margin-top: 64px; padding-top: 24px; border-top: 1px dashed var(--line);
+    font-size: 12px; color: var(--ink-faint);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <a class="back" href="/">← Invoices</a>
+    <h1>Invoices API</h1>
+    <p>Generate cross-chain USDC invoice links programmatically. One endpoint, action-based, no API key.</p>
+    <div class="base-url">
+      <span class="label">Base URL</span>
+      <code>https://api.invoices.wtf</code>
+    </div>
+  </header>
+
+  <section>
+    <h2>Create an invoice link</h2>
+    <h3><span class="method">POST</span> /</h3>
+    <p class="desc">
+      Generates an invoice exactly like the web form does — a random invoice ID, a deterministic
+      deposit address derived from it, and a share URL that opens directly in the app.
+    </p>
+
+    <table class="field-table">
+      <tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr>
+      <tr><td class="name">action</td><td>string</td><td class="req">required</td><td>must be <code>"createInvoiceUrl"</code></td></tr>
+      <tr><td class="name">companyName</td><td>string</td><td class="req">required</td><td>shown on the invoice</td></tr>
+      <tr><td class="name">description</td><td>string</td><td class="opt">optional</td><td>defaults to empty</td></tr>
+      <tr><td class="name">amount</td><td>string</td><td class="req">required</td><td>decimal USDC, e.g. <code>"25"</code> or <code>"25.50"</code> — not atomic units</td></tr>
+      <tr><td class="name">destination</td><td>object</td><td class="req">required</td><td>see below</td></tr>
+    </table>
+
+    <p class="desc"><strong style="color:var(--ink)">destination</strong> — one of:</p>
+    <pre><span class="c">// EVM — Base, Arbitrum, or Polygon</span>
+{ <span class="k">"type"</span>: <span class="s">"evm"</span>, <span class="k">"chainId"</span>: <span class="n">8453</span>, <span class="k">"address"</span>: <span class="s">"0x..."</span> }
+
+<span class="c">// Solana — destination only, no chainId (Solana isn't EVM,</span>
+<span class="c">// so there's no equivalent small integer chain id to use)</span>
+{ <span class="k">"type"</span>: <span class="s">"solana"</span>, <span class="k">"address"</span>: <span class="s">"..."</span> }</pre>
+
+    <p class="desc">Supported EVM <code>chainId</code> values — the only chains covered by gasless relaying today:</p>
+    <ul class="chains">
+      <li>8453 · Base</li>
+      <li>42161 · Arbitrum</li>
+      <li>137 · Polygon</li>
+    </ul>
+
+    <p class="desc"><strong style="color:var(--ink)">Request</strong></p>
+    <pre><span class="k">curl</span> -X POST https://api.invoices.wtf \
+  -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{
+    "action": "createInvoiceUrl",
+    "companyName": "Loud Socks Studio",
+    "description": "Podcast intro pack",
+    "amount": "25",
+    "destination": { "type": "evm", "chainId": 8453, "address": "0x1Cc1BD36202546E57B5337a8ba9BcC3Df815D3Cc" }
+  }'</span></pre>
+
+    <p class="desc"><strong style="color:var(--ink)">Response</strong></p>
+    <pre>{
+  <span class="k">"invoiceId"</span>: <span class="s">"8d1c633a-8a33-44d3-aecb-8fb28fbf801f"</span>,
+  <span class="k">"address"</span>: <span class="s">"0x118dED52dF3cCcD97F8134fa1A1863DE78441444"</span>,
+  <span class="k">"invoiceNumber"</span>: <span class="s">"INV-979707"</span>,
+  <span class="k">"url"</span>: <span class="s">"https://www.invoices.wtf/#i=eyJ2Ijo2..."</span>
+}</pre>
+    <p class="desc">Open <code>url</code> directly, or extract <code>address</code> to display or watch yourself.</p>
+  </section>
+
+  <section>
+    <h2>Look up a deposit address</h2>
+    <h3><span class="method">POST</span> /</h3>
+    <p class="desc">
+      Re-derives an invoice's deposit address from its ID. Deterministic — always returns the
+      same address for the same ID, no lookup or storage involved.
+    </p>
+    <pre>{ <span class="k">"action"</span>: <span class="s">"address"</span>, <span class="k">"invoiceId"</span>: <span class="s">"..."</span> }</pre>
+    <pre><span class="c">// →</span> { <span class="k">"address"</span>: <span class="s">"0x..."</span> }</pre>
+  </section>
+
+  <section>
+    <h2>Other actions</h2>
+    <p class="desc">
+      Used internally by the web app's settlement tracker — documented here for completeness
+      since the endpoint has no auth wall, not because they're the primary integration surface.
+    </p>
+
+    <h3 style="margin-top:24px">previewQuote</h3>
+    <p class="desc">Dry-run fee/fill estimate for a hypothetical cross-chain payment, before any real funds move.</p>
+    <pre>{ <span class="k">"action"</span>: <span class="s">"previewQuote"</span>, <span class="k">"originChainId"</span>: <span class="n">8453</span>, <span class="k">"destination"</span>: { ... }, <span class="k">"amount"</span>: <span class="s">"25000000"</span> }</pre>
+
+    <h3 style="margin-top:24px">relay</h3>
+    <p class="desc">Triggers a relay attempt for whatever USDC is actually sitting at an invoice's deposit address right now on a given chain. Reads the live balance itself — sweeps the exact amount, never a client-supplied figure.</p>
+    <pre>{ <span class="k">"action"</span>: <span class="s">"relay"</span>, <span class="k">"invoiceId"</span>: <span class="s">"..."</span>, <span class="k">"chainId"</span>: <span class="n">8453</span>, <span class="k">"destination"</span>: { ... } }</pre>
+
+    <h3 style="margin-top:24px">status</h3>
+    <p class="desc">Checks a cross-chain relay's bridge status by deposit address.</p>
+    <pre>{ <span class="k">"action"</span>: <span class="s">"status"</span>, <span class="k">"depositAddress"</span>: <span class="s">"..."</span> }</pre>
+  </section>
+
+  <section>
+    <h2>Errors</h2>
+    <p class="desc">Every error returns a non-2xx status with a JSON body:</p>
+    <pre>{ <span class="k">"error"</span>: <span class="s">"amount \"abc\" is not a valid decimal USDC value"</span> }</pre>
+  </section>
+
+  <footer class="page">
+    <a href="/">← Back to Invoices</a>
+  </footer>
+
+</div>
+</body>
+</html>
