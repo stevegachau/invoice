@@ -29,7 +29,13 @@ export const RPC_URLS: Record<SupportedChainId, string[]> = {
     "https://base-rpc.publicnode.com",
   ],
   [arbitrum.id]: ["https://arb1.arbitrum.io/rpc", "https://arbitrum.publicnode.com"],
-  [polygon.id]: ["https://polygon-rpc.com", "https://polygon-bor-rpc.publicnode.com"],
+  [polygon.id]: [
+    // polygon-rpc.com dropped — confirmed dead in testing.
+    "https://polygon-bor-rpc.publicnode.com",
+    "https://polygon.llamarpc.com",
+    "https://rpc.ankr.com/polygon",
+    "https://1rpc.io/matic",
+  ],
 };
 
 // Rough average block times (ms) — used only to estimate a starting block

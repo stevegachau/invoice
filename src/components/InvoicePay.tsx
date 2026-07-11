@@ -48,18 +48,21 @@ export function InvoicePay({
     issued.invoiceAddress,
     issued.issuedAt,
     destination,
+    cachedRelay,
   );
-  const complete = settlement.complete || cachedRelay?.status === "relayed";
+  const complete = settlement.complete;
   const relay = settlement.relay ?? cachedRelay;
 
-  // Persist a successful relay result into the URL hash so reopening the
-  // link shows "complete" immediately, without re-scanning from scratch.
+  // Persist the relay result into the URL hash so reopening the link
+  // reflects it — and re-persist once `complete` flips true, so a fully
+  // settled invoice shows "Landed" instantly on reopen instead of forcing
+  // a fresh 1Click poll every single time.
   useEffect(() => {
     if (settlement.relay && settlement.relay.status === "relayed") {
       window.location.hash = "#" + encodeInvoiceHash(issued, settlement.relay);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settlement.relay]);
+  }, [settlement.relay, settlement.complete]);
 
   async function handleCopyAddr() {
     await navigator.clipboard.writeText(issued.invoiceAddress);
