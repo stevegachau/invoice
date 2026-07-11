@@ -193,11 +193,12 @@ textarea:focus {
   /* Both translate (centering) and rotate (orientation) must live in this
      one transform — a separate Tailwind rotate-* utility class on the
      element would set its own `transform` and silently replace this one
-     instead of combining with it, which is what caused the plane to drift
-     below the line and point the wrong way. Lucide's Plane icon points
-     straight up by default; 90deg turns it to point right, the direction
-     of travel. */
-  transform: translate(-50%, -50%) rotate(90deg);
+     instead of combining with it. Lucide's Plane icon points diagonally
+     up-right (~45deg) by default, not straight up — 45deg more brings it
+     to 90deg, pointing right, the direction of travel. (An earlier
+     90deg-rotation attempt landed at 135deg instead, confirming the
+     default really is ~45deg, not 0deg as first assumed.) */
+  transform: translate(-50%, -50%) rotate(45deg);
 }
 
 @media (prefers-reduced-motion: reduce) {
