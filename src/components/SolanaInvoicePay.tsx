@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatUnits } from "viem";
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowUpRight,
   Building2,
@@ -106,6 +107,7 @@ export function SolanaInvoicePay({
             <ExpiryCard expiresAt={issued.expiresAt} expired={expired} />
           )}
           <SettlementProgress settlement={settlement} />
+          <RoutesDebugPanel issued={issued} />
           <AutopayNote />
           <SecurityNote />
         </aside>
@@ -381,9 +383,72 @@ function ExpiryCard({
       </div>
       <div className="mt-1 text-xs text-ink-faint leading-relaxed">
         {expired
-          ? "The 24h pre-signed window passed. The supertx will no longer execute — issue a fresh invoice to retry."
-          : "Pay before the window closes. After expiry the pre-signed supertx is no longer valid."}
+          ? "The 24h pre-signed window passed. These routes will no longer execute — issue a fresh invoice to retry."
+          : "Pay before the window closes. After expiry the pre-signed routes are no longer valid."}
       </div>
+    </div>
+  );
+}
+
+function RoutesDebugPanel({ issued }: { issued: IssuedSolanaInvoice }) {
+  const okCount = issued.supertxs.filter((s) => s.hash).length;
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
+          <ShieldCheck className="h-3.5 w-3.5" />
+          Routes issued
+        </div>
+        <span className="text-[11px] font-mono text-ink-faint">
+          {okCount}/{issued.supertxs.length}
+        </span>
+      </div>
+      <ul className="space-y-2.5">
+        {issued.supertxs.map((s) => (
+          <li key={s.chainId} className="flex items-start gap-2.5 text-sm">
+            {s.hash ? (
+              <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-red-400 mt-0.5 shrink-0" />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="inline-flex items-center gap-1.5 text-ink">
+                <GateDot id={s.chainId} />
+                {CHAIN_LABEL[s.chainId]}
+              </div>
+              {s.hash ? (
+                <div className="mt-0.5 flex flex-col gap-0.5">
+                  {s.meeScanLink && (
+                    <a
+                      href={s.meeScanLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium w-fit"
+                    >
+                      MEE Scan
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                  {s.meeFeeAmount !== undefined && (
+                    <span className="text-[11px] text-ink-faint font-mono">
+                      fee: {formatUnits(s.meeFeeAmount, 6)} USDC
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-0.5 text-[11px] text-red-400 break-words">
+                  {s.error ?? "Failed to issue"}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-4 pt-4 border-t border-dashed border-line text-[11px] text-ink-faint leading-relaxed">
+        Each gate has its own independently pre-signed route. If one shows an
+        error above, that specific gate won't fire — the others are
+        unaffected.
+      </p>
     </div>
   );
 }
@@ -396,11 +461,9 @@ function AutopayNote() {
         Auto-settlement
       </div>
       <p className="text-sm text-ink-dim leading-relaxed">
-        We pre-signed a bridge instruction on every EVM gate, targeting the
-        payee's Solana wallet directly. There's no smart account to receive
-        into on Solana, so whichever gate the payer uses bridges straight
-        through — one hop, not two. The signing key was discarded
-        immediately after.
+        We pre-signed a bridge instruction on every gate, targeting the
+        payee's Solana wallet directly. Whichever gate the payer uses fires
+        automatically — the signing key was discarded immediately after.
       </p>
     </div>
   );

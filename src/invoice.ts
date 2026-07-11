@@ -5,6 +5,7 @@ import {
   MEEVersion,
   runtimeERC20BalanceOf,
   greaterThanOrEqualTo,
+  getMeeScanLink,
 } from "@biconomy/abstractjs";
 import { erc20Abi, fallback, http, type Address } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
@@ -31,6 +32,14 @@ export type InvoiceMeta = {
 
 export type Supertx = {
   hash?: `0x${string}`;
+  meeScanLink?: string;
+  // MEE's own execution fee, in the feeToken's units (USDC, 6 decimals) —
+  // read straight from getQuote()'s response, before executeQuote is ever
+  // called. Since destForward sweeps whatever balance actually remains
+  // (not a fixed invoice.amount), the payee nets invoice.amount minus this
+  // fee automatically — this field just lets us say that number honestly
+  // in the UI instead of leaving it to be discovered.
+  meeFeeAmount?: bigint;
   error?: string;
 };
 
@@ -99,7 +108,15 @@ export async function issueInvoice(
     invoice,
     upperBoundTimestamp,
   })
-    .then((hash) => ({ hash }))
+    .then(({ hash, meeFeeAmount }) => {
+      const meeScanLink = getMeeScanLink(hash);
+      // Not shown to the payer — this is a debugging aid. If a supertx
+      // sits with funds received but no bridge/forward firing, MEE Scan is
+      // the place to check *why* (stuck in simulation, no sponsor balance,
+      // etc.) rather than guessing blind.
+      console.log("MEE Scan:", meeScanLink, "| MEE fee:", meeFeeAmount);
+      return { hash, meeScanLink, meeFeeAmount };
+    })
     .catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
 
   // The ephemeral key has signed and submitted the supertx to the MEE node.
@@ -130,7 +147,7 @@ async function issueAllChains({
   meeClient: MeeClient;
   invoice: Invoice;
   upperBoundTimestamp: number;
-}): Promise<`0x${string}`> {
+}): Promise<{ hash: `0x${string}`; meeFeeAmount?: bigint }> {
   const dest = invoice.destinationChainId;
   const smartAddrOnDest = orchestrator.addressOn(dest, true);
 
@@ -230,13 +247,35 @@ async function issueAllChains({
     )
   ).flat();
 
+  // Sponsorship requires per-project activation + a funded gas tank on
+  // dashboard.biconomy.io — not yet set up for this project, so
+  // `sponsorship: true` accepts the quote but then has nothing to pay
+  // execution with, and the supertx just never fires (funds sit at the
+  // invoice address indefinitely, no error surfaced). Paying gas in USDC on
+  // the destination chain instead — that's the one chain guaranteed to hold
+  // a USDC balance once the destForward step is ready to run (same-chain
+  // payment or a completed bridge fill).
   const quote = await meeClient.getQuote({
-    sponsorship: true,
+    feeToken: { address: USDC[dest], chainId: dest },
     instructions: [...bridgeInstructions, destForward],
     upperBoundTimestamp,
     executionSimulationRetryDelay: SIMULATION_RETRY_MS,
   });
 
+  // Available before execution — this is what destForward's balance sweep
+  // will actually pay out of, so we can tell the payer/payee the true net
+  // amount instead of them discovering a shortfall.
+  const meeFeeAmount = parseMeeFeeAmount(quote.paymentInfo?.tokenAmount);
+
   const { hash } = await meeClient.executeQuote({ quote });
-  return hash;
+  return { hash, meeFeeAmount };
+}
+
+function parseMeeFeeAmount(value: unknown): bigint | undefined {
+  if (value === undefined || value === null) return undefined;
+  try {
+    return BigInt(value as string | number | bigint);
+  } catch {
+    return undefined;
+  }
 }

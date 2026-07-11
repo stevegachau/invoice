@@ -285,7 +285,7 @@ export function InvoiceForm({
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
               {isSolana
-                ? "Signing supertx to Solana…"
+                ? "Signing routes to Solana…"
                 : "Signing supertx across 5 gates…"}
             </>
           ) : (
@@ -297,7 +297,7 @@ export function InvoiceForm({
         </button>
         <p className="mt-3 text-[11px] text-center text-ink-faint">
           {isSolana
-            ? "We pre-sign one supertx bridging directly to the Solana address from any of the 5 EVM gates — it expires after 24h."
+            ? "We pre-sign a route on every gate — whichever the payer uses fires automatically — it expires after 24h."
             : "We pre-sign one supertx spanning all 5 gates. Whichever the payer uses fires automatically — it expires after 24h."}
         </p>
       </footer>

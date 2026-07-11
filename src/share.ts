@@ -3,7 +3,7 @@ import type { AnyIssuedInvoice } from "./anyInvoice";
 import type { SupportedChainId } from "./chains";
 
 const HASH_PREFIX = "i=";
-const VERSION = 4; // bumped: added `k` (kind) to support Solana-destination invoices
+const VERSION = 5; // bumped: solana invoices now carry an array of per-chain supertxs, not one
 
 type WireCommon = {
   v: number;
@@ -15,7 +15,12 @@ type WireCommon = {
   co: string;
   d: string;
   a: string;
+};
+
+type WireSupertx = {
   h?: `0x${string}`;
+  ms?: string;
+  mf?: string; // meeFeeAmount, stringified bigint
   e?: string;
 };
 
@@ -23,18 +28,20 @@ type WireEvm = WireCommon & {
   k: "evm";
   p: Address;
   c: SupportedChainId;
-};
+} & WireSupertx;
 
 type WireSolana = WireCommon & {
   k: "solana";
   p: string; // base58 Solana address
+  sx: (WireSupertx & { c: SupportedChainId })[]; // one per origin chain
 };
 
 type Wire = WireEvm | WireSolana;
 
 export function encodeInvoiceHash(i: AnyIssuedInvoice): string {
-  const common = {
+  const common: WireCommon = {
     v: VERSION,
+    k: i.kind,
     addr: i.invoiceAddress,
     n: i.invoiceNumber,
     t: i.issuedAt,
@@ -42,8 +49,6 @@ export function encodeInvoiceHash(i: AnyIssuedInvoice): string {
     co: i.meta.companyName,
     d: i.meta.description,
     a: i.invoice.amount.toString(),
-    h: i.supertx.hash,
-    e: i.supertx.error,
   };
 
   const wire: Wire =
@@ -53,11 +58,22 @@ export function encodeInvoiceHash(i: AnyIssuedInvoice): string {
           k: "evm",
           p: i.invoice.payeeAddress,
           c: i.invoice.destinationChainId,
+          h: i.supertx.hash,
+          ms: i.supertx.meeScanLink,
+          mf: i.supertx.meeFeeAmount?.toString(),
+          e: i.supertx.error,
         }
       : {
           ...common,
           k: "solana",
           p: i.invoice.payeeSolanaAddress,
+          sx: i.supertxs.map((s) => ({
+            c: s.chainId,
+            h: s.hash,
+            ms: s.meeScanLink,
+            mf: s.meeFeeAmount?.toString(),
+            e: s.error,
+          })),
         };
 
   return HASH_PREFIX + toBase64Url(JSON.stringify(wire));
@@ -72,34 +88,46 @@ export function decodeInvoiceHash(hash: string): AnyIssuedInvoice | null {
     if (w.v !== VERSION) return null;
 
     const meta = { companyName: w.co, description: w.d };
-    const shared = {
+    const base = {
       invoiceAddress: w.addr,
       invoiceNumber: w.n,
       issuedAt: w.t,
       expiresAt: w.exp,
       meta,
-      supertx: { hash: w.h, error: w.e },
     };
 
     if (w.k === "evm") {
       return {
         kind: "evm",
-        ...shared,
+        ...base,
         invoice: {
           payeeAddress: w.p,
           destinationChainId: w.c,
           amount: BigInt(w.a),
+        },
+        supertx: {
+          hash: w.h,
+          meeScanLink: w.ms,
+          meeFeeAmount: w.mf !== undefined ? BigInt(w.mf) : undefined,
+          error: w.e,
         },
       };
     }
 
     return {
       kind: "solana",
-      ...shared,
+      ...base,
       invoice: {
         payeeSolanaAddress: w.p,
         amount: BigInt(w.a),
       },
+      supertxs: w.sx.map((s) => ({
+        chainId: s.c,
+        hash: s.h,
+        meeScanLink: s.ms,
+        meeFeeAmount: s.mf !== undefined ? BigInt(s.mf) : undefined,
+        error: s.e,
+      })),
     };
   } catch {
     return null;
