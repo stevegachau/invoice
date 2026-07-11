@@ -173,42 +173,10 @@
     <p class="desc"><strong style="color:var(--ink)">Response</strong></p>
     <pre>{
   <span class="k">"invoiceId"</span>: <span class="s">"8d1c633a-8a33-44d3-aecb-8fb28fbf801f"</span>,
-  <span class="k">"address"</span>: <span class="s">"0x118dED52dF3cCcD97F8134fa1A1863DE78441444"</span>,
   <span class="k">"invoiceNumber"</span>: <span class="s">"INV-979707"</span>,
   <span class="k">"url"</span>: <span class="s">"https://www.invoices.wtf/#i=eyJ2Ijo2..."</span>
 }</pre>
-    <p class="desc">Open <code>url</code> directly, or extract <code>address</code> to display or watch yourself.</p>
-  </section>
-
-  <section>
-    <h2>Look up a deposit address</h2>
-    <h3><span class="method">POST</span> /</h3>
-    <p class="desc">
-      Re-derives an invoice's deposit address from its ID. Deterministic — always returns the
-      same address for the same ID, no lookup or storage involved.
-    </p>
-    <pre>{ <span class="k">"action"</span>: <span class="s">"address"</span>, <span class="k">"invoiceId"</span>: <span class="s">"..."</span> }</pre>
-    <pre><span class="c">// →</span> { <span class="k">"address"</span>: <span class="s">"0x..."</span> }</pre>
-  </section>
-
-  <section>
-    <h2>Other actions</h2>
-    <p class="desc">
-      Used internally by the web app's settlement tracker — documented here for completeness
-      since the endpoint has no auth wall, not because they're the primary integration surface.
-    </p>
-
-    <h3 style="margin-top:24px">previewQuote</h3>
-    <p class="desc">Dry-run fee/fill estimate for a hypothetical cross-chain payment, before any real funds move.</p>
-    <pre>{ <span class="k">"action"</span>: <span class="s">"previewQuote"</span>, <span class="k">"originChainId"</span>: <span class="n">8453</span>, <span class="k">"destination"</span>: { ... }, <span class="k">"amount"</span>: <span class="s">"25000000"</span> }</pre>
-
-    <h3 style="margin-top:24px">relay</h3>
-    <p class="desc">Triggers a relay attempt for whatever USDC is actually sitting at an invoice's deposit address right now on a given chain. Reads the live balance itself — sweeps the exact amount, never a client-supplied figure.</p>
-    <pre>{ <span class="k">"action"</span>: <span class="s">"relay"</span>, <span class="k">"invoiceId"</span>: <span class="s">"..."</span>, <span class="k">"chainId"</span>: <span class="n">8453</span>, <span class="k">"destination"</span>: { ... } }</pre>
-
-    <h3 style="margin-top:24px">status</h3>
-    <p class="desc">Checks a cross-chain relay's bridge status by deposit address.</p>
-    <pre>{ <span class="k">"action"</span>: <span class="s">"status"</span>, <span class="k">"depositAddress"</span>: <span class="s">"..."</span> }</pre>
+    <p class="desc">Open <code>url</code> — that's the whole integration. The app takes it from there.</p>
   </section>
 
   <section>
