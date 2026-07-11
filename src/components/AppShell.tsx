@@ -54,9 +54,28 @@ function BottomBar() {
   return (
     <footer className="border-t border-line-soft">
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between text-[11px] font-mono text-ink-faint uppercase tracking-wider">
-        <span>USDC · 5 gates</span>
-        <span>Invoices</span>
+        <span className="inline-flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-500 pulse-dot" />
+          All systems operational
+        </span>
+        <a
+          href="https://x.com/invoiceswtf"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Invoices on X"
+          className="text-ink-faint hover:text-ink transition"
+        >
+          <XLogo className="h-3.5 w-3.5" />
+        </a>
       </div>
     </footer>
+  );
+}
+
+function XLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
   );
 }

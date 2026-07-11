@@ -29,10 +29,12 @@ export function GateBadge({
   id,
   size = "md",
   active,
+  tone = "amber",
 }: {
   id: GateId;
   size?: "sm" | "md" | "lg";
   active?: boolean;
+  tone?: "amber" | "origin";
 }) {
   const t = CHAIN_THEME[id];
   const dim =
@@ -41,13 +43,15 @@ export function GateBadge({
       : size === "lg"
         ? "h-10 px-3.5 text-xs gap-2"
         : "h-8 px-3 text-[11px] gap-1.5";
+  const activeClass =
+    tone === "origin"
+      ? "border-[#5b8cff]/50 bg-[#5b8cff]/10 text-[#8ca9ff]"
+      : "border-amber-500/50 bg-amber-50 text-amber-300";
   return (
     <span
       className={
         `inline-flex items-center ${dim} rounded-md border font-mono uppercase tracking-wider transition ` +
-        (active
-          ? "border-amber-500/50 bg-amber-50 text-amber-300"
-          : "border-line bg-surface-2 text-ink-dim")
+        (active ? activeClass : "border-line bg-surface-2 text-ink-dim")
       }
     >
       <span

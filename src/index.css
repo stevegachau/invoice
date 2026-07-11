@@ -168,10 +168,37 @@ textarea:focus {
   animation: scan 2s ease-in-out infinite;
 }
 
+@keyframes route-fly {
+  0% {
+    left: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+
+.route-plane {
+  position: absolute;
+  top: 50%;
+  animation: route-fly 3.2s linear infinite;
+  transform: translate(-50%, -50%);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .flap-char,
   .pulse-dot,
-  .scan-shimmer {
+  .scan-shimmer,
+  .route-plane {
     animation: none !important;
+    left: 50% !important;
+    opacity: 1 !important;
   }
 }

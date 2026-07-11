@@ -103,7 +103,7 @@ function RoutePlan() {
     },
     {
       title: "Touchdown, then forwarding",
-      body: "USDC lands anywhere — it's forwarded to you automatically, gaslessly.",
+      body: "USDC lands anywhere — it's forwarded to you automatically.",
     },
   ];
   return (
@@ -132,7 +132,8 @@ function RoutePlan() {
       </ol>
       <div className="mt-1 pt-4 border-t border-dashed border-line flex items-center gap-2 text-[11px] text-ink-faint">
         <PlaneTakeoff className="h-3.5 w-3.5 text-amber-500/70" />
-        No expiry — pay whenever you're ready.
+        One address, live on all 3 gates. Whatever arrives gets forwarded
+        automatically.
       </div>
     </aside>
   );

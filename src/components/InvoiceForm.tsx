@@ -224,10 +224,7 @@ export function InvoiceForm({
               <button
                 key={id}
                 type="button"
-                onClick={() => {
-                  setDestinationGate(id);
-                  setPayee("");
-                }}
+                onClick={() => setDestinationGate(id)}
                 className={
                   "group relative rounded-lg border px-3 py-3 text-sm transition flex flex-col items-center justify-center gap-1 " +
                   (selected

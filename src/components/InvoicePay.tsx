@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Link2,
   Loader2,
+  Plane,
   PlaneLanding,
   ShieldCheck,
   Timer,
@@ -76,6 +77,9 @@ export function InvoicePay({
   }
 
   const status: "paid" | "awaiting" = complete ? "paid" : "awaiting";
+  const originGateId: GateId | undefined = complete
+    ? settlement.source?.chainId
+    : undefined;
 
   return (
     <div className="space-y-6">
@@ -115,6 +119,7 @@ export function InvoicePay({
           issued={issued}
           amountStr={amountStr}
           destGateId={destGateId}
+          originGateId={originGateId}
           status={status}
           copiedAddr={copiedAddr}
           onCopyAddr={handleCopyAddr}
@@ -166,6 +171,7 @@ function InvoiceDocument({
   issued,
   amountStr,
   destGateId,
+  originGateId,
   status,
   copiedAddr,
   onCopyAddr,
@@ -173,6 +179,7 @@ function InvoiceDocument({
   issued: IssuedInvoice;
   amountStr: string;
   destGateId: GateId;
+  originGateId?: GateId;
   status: "paid" | "awaiting";
   copiedAddr: boolean;
   onCopyAddr: () => void;
@@ -256,6 +263,25 @@ function InvoiceDocument({
         <EdgeNotches />
       </div>
 
+      {originGateId !== undefined && (
+        <div className="relative px-8 py-6 border-b border-dashed border-line">
+          <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint mb-3">
+            Route
+          </div>
+          <div className="flex items-center gap-3">
+            <GateBadge id={originGateId} size="lg" tone="origin" active />
+            <div className="relative flex-1 h-5 min-w-[48px]">
+              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-dashed border-line" />
+              <Plane
+                aria-hidden
+                className="route-plane h-3.5 w-3.5 text-[#5b8cff] -rotate-45"
+              />
+            </div>
+            <GateBadge id={destGateId} size="lg" active />
+          </div>
+        </div>
+      )}
+
       {status === "paid" ? (
         <div className="relative px-8 py-7 border-b border-dashed border-line">
           <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
@@ -336,7 +362,7 @@ function InvoiceDocument({
       <div className="relative border-t border-dashed border-line px-8 py-4 flex items-center justify-between text-[11px] text-ink-faint">
         <span className="inline-flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5" />
-          Settled gaslessly across chains
+          Self-routing across chains
         </span>
         <span className="font-mono">v2</span>
       </div>
@@ -401,7 +427,7 @@ function PaidCard({
         Landed
       </div>
       <div className="text-sm text-ink-dim leading-relaxed">
-        {landedAmountFormatted} USDC forwarded to the payee on {recipientLabel}, gaslessly.
+        {landedAmountFormatted} USDC forwarded to the payee on {recipientLabel}.
       </div>
       <div className="mt-3 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
         Paid to
@@ -539,7 +565,7 @@ function ProgressStep({
         <div className={"text-sm font-medium " + (done ? "text-ink" : "text-ink-dim")}>
           {title}
         </div>
-        <div className="mt-0.5 text-xs text-ink-dim inline-flex items-center gap-1.5">
+        <div className="mt-0.5 text-xs text-ink-dim flex w-fit items-center gap-1.5">
           {chainId !== undefined && <GateDot id={chainId} />}
           <span className="tabular font-mono">{detail}</span>
         </div>
@@ -548,7 +574,7 @@ function ProgressStep({
             href={explorerUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium"
+            className="mt-1 flex w-fit items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium"
             title={txHash}
           >
             <span className="font-mono">
