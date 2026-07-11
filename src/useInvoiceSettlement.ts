@@ -8,6 +8,12 @@ export type InvoiceSettlement = {
   source?: { chainId: SupportedChainId; txHash?: Hex; amount?: bigint };
   relay?: RelayResult;
   oneClickStatus?: OneClickStatus;
+  // The real step-3 delivery tx on the destination chain, once 1Click
+  // reports it (confirmed live under swapDetails.destinationChainTxHashes)
+  // — distinct from relay.relayTxHash, which for a cross-chain relay is
+  // only the step-2 bridge deposit on the origin chain.
+  destinationTxHash?: string;
+  destinationAmountFormatted?: string;
   complete: boolean;
   // Set only if we saw a real inflow but couldn't resolve an outcome after
   // retrying — should be rare now that outbound transfers are also watched
@@ -68,7 +74,11 @@ export function useInvoiceSettlement(
 ): InvoiceSettlement {
   const [state, setState] = useState<InvoiceSettlement>(() => {
     if (!cachedRelay || cachedRelay.status !== "relayed") return { complete: false };
-    return { relay: cachedRelay, complete: cachedRelay.mode === "same-chain" };
+    return {
+      relay: cachedRelay,
+      source: { chainId: cachedRelay.chainId, amount: BigInt(cachedRelay.amount) },
+      complete: cachedRelay.mode === "same-chain",
+    };
   });
   const relayAttempts = useRef<Map<SupportedChainId, number>>(new Map());
   const relayInFlight = useRef<Set<SupportedChainId>>(new Set());
@@ -186,6 +196,7 @@ export function useInvoiceSettlement(
                   relay: {
                     status: "relayed",
                     mode: "same-chain",
+                    chainId,
                     address: invoiceAddress,
                     amount: outAmount.toString(),
                     relayTxHash: first.transactionHash ?? "",
@@ -198,6 +209,7 @@ export function useInvoiceSettlement(
                 relay: {
                   status: "relayed",
                   mode: "cross-chain",
+                  chainId,
                   address: invoiceAddress,
                   amount: outAmount.toString(),
                   relayTxHash: first.transactionHash ?? "",
@@ -278,9 +290,16 @@ export function useInvoiceSettlement(
     async function tick() {
       if (cancelled) return;
       try {
-        const { status } = await fetchOneClickStatus(depositAddress);
-        setState((prev) => ({ ...prev, oneClickStatus: status }));
-        if (status === "SUCCESS") {
+        const result = await fetchOneClickStatus(depositAddress);
+        const destTxHash = result.swapDetails?.destinationChainTxHashes?.[0]?.hash;
+        setState((prev) => ({
+          ...prev,
+          oneClickStatus: result.status,
+          destinationTxHash: destTxHash ?? prev.destinationTxHash,
+          destinationAmountFormatted:
+            result.swapDetails?.amountOutFormatted ?? prev.destinationAmountFormatted,
+        }));
+        if (result.status === "SUCCESS") {
           setState((prev) => ({ ...prev, complete: true }));
         }
       } catch {

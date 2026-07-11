@@ -84,9 +84,8 @@ function Hero() {
       </h1>
       <p className="mt-3 text-ink-dim text-[15px] leading-relaxed">
         Issue an invoice, get one link. Your customer sends USDC through
-        whichever chain they're holding it on — we pre-sign nothing and
-        pay no gas ourselves, and it forwards automatically the moment it
-        touches down.
+        whichever chain they're holding it on & it's settled automatically
+        to your preferred network the moment it touches down.
       </p>
     </section>
   );

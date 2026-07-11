@@ -11,7 +11,6 @@ import {
   Clock,
   Copy,
   ExternalLink,
-  Info,
   Link2,
   Loader2,
   PlaneLanding,
@@ -20,7 +19,7 @@ import {
 } from "lucide-react";
 import { CHAINS, CHAIN_LABEL, type SupportedChainId } from "../chains";
 import type { IssuedInvoice } from "../invoice";
-import type { RelayResult } from "../relayApi";
+import type { Destination, RelayResult } from "../relayApi";
 import { GateDot, GateBadge, gateLetter, SOLANA_GATE_ID, type GateId } from "./GateBadge";
 import { SplitFlap } from "./SplitFlap";
 import { buildShareUrl, encodeInvoiceHash } from "../share";
@@ -123,13 +122,16 @@ export function InvoicePay({
 
         <aside className="space-y-4 lg:sticky lg:top-20">
           {complete ? (
-            <PaidCard relay={relay} />
+            <PaidCard
+              relay={relay}
+              destination={destination}
+              destinationTxHash={settlement.destinationTxHash}
+              destinationAmountFormatted={settlement.destinationAmountFormatted}
+            />
           ) : (
             <StatusNote unconfirmed={settlement.unconfirmed} />
           )}
           <SettlementProgress settlement={settlement} destGateId={destGateId} />
-          <AutopayNote />
-          <SecurityNote />
         </aside>
       </div>
     </div>
@@ -254,64 +256,82 @@ function InvoiceDocument({
         <EdgeNotches />
       </div>
 
-      <div className="relative px-8 py-7 border-b border-dashed border-line">
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-              Send USDC to this address
-            </div>
-            <div className="mt-1 text-sm text-ink-dim">
-              Pay from any gate below — funds forward to{" "}
-              {destGateId === SOLANA_GATE_ID ? "Solana" : CHAIN_LABEL[destGateId]}{" "}
-              automatically the moment they arrive.
-            </div>
-          </div>
-          <span className="hidden sm:inline-flex h-9 w-9 rounded-md bg-amber-50 text-amber-400 items-center justify-center shrink-0">
-            <PlaneLanding className="h-4 w-4" />
-          </span>
-        </div>
-
-        <div className="rounded-xl border border-dashed border-line bg-bg p-4 flex items-center gap-3">
-          <code className="flex-1 min-w-0 break-all font-mono text-[13px] sm:text-sm text-ink leading-relaxed">
-            {issued.invoiceAddress}
-          </code>
-          <button
-            onClick={onCopyAddr}
-            className={
-              "shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-medium transition " +
-              (copiedAddr
-                ? "bg-green-500 text-bg"
-                : "bg-surface border border-line text-ink-dim hover:border-ink-faint hover:bg-surface-2")
-            }
-          >
-            {copiedAddr ? (
-              <>
-                <Check className="h-3.5 w-3.5" />
-                Copied
-              </>
-            ) : (
-              <>
-                <Copy className="h-3.5 w-3.5" />
-                Copy
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      <div className="relative px-8 py-7">
-        <div className="flex items-center justify-between mb-3">
+      {status === "paid" ? (
+        <div className="relative px-8 py-7 border-b border-dashed border-line">
           <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-            Open gates
+            Invoice settled
           </div>
-          <div className="text-[11px] text-ink-faint">USDC only</div>
+          <div className="mt-1 text-sm text-ink-dim">
+            This invoice has been paid and forwarded. The deposit address
+            below is no longer monitored — don't send anything else to it.
+          </div>
+          <div className="mt-4 rounded-xl border border-dashed border-line bg-bg p-4">
+            <code className="block break-all font-mono text-[13px] sm:text-sm text-ink-faint leading-relaxed">
+              {issued.invoiceAddress}
+            </code>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {CHAINS.map((c) => (
-            <GateBadge key={c.id} id={c.id} active={c.id === destGateId} />
-          ))}
-        </div>
-      </div>
+      ) : (
+        <>
+          <div className="relative px-8 py-7 border-b border-dashed border-line">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
+                  Send USDC to this address
+                </div>
+                <div className="mt-1 text-sm text-ink-dim">
+                  Pay from any gate below — funds forward to the recipient's
+                  preferred network the moment they arrive.
+                </div>
+              </div>
+              <span className="hidden sm:inline-flex h-9 w-9 rounded-md bg-amber-50 text-amber-400 items-center justify-center shrink-0">
+                <PlaneLanding className="h-4 w-4" />
+              </span>
+            </div>
+
+            <div className="rounded-xl border border-dashed border-line bg-bg p-4 flex items-center gap-3">
+              <code className="flex-1 min-w-0 break-all font-mono text-[13px] sm:text-sm text-ink leading-relaxed">
+                {issued.invoiceAddress}
+              </code>
+              <button
+                onClick={onCopyAddr}
+                className={
+                  "shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-medium transition " +
+                  (copiedAddr
+                    ? "bg-green-500 text-bg"
+                    : "bg-surface border border-line text-ink-dim hover:border-ink-faint hover:bg-surface-2")
+                }
+              >
+                {copiedAddr ? (
+                  <>
+                    <Check className="h-3.5 w-3.5" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="relative px-8 py-7">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
+                Open gates
+              </div>
+              <div className="text-[11px] text-ink-faint">USDC only</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {CHAINS.map((c) => (
+                <GateBadge key={c.id} id={c.id} />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="relative border-t border-dashed border-line px-8 py-4 flex items-center justify-between text-[11px] text-ink-faint">
         <span className="inline-flex items-center gap-1.5">
@@ -333,8 +353,47 @@ function EdgeNotches() {
   );
 }
 
-function PaidCard({ relay }: { relay?: RelayResult }) {
-  const txHash = relay && relay.status === "relayed" ? relay.relayTxHash : undefined;
+function PaidCard({
+  relay,
+  destination,
+  destinationTxHash,
+  destinationAmountFormatted,
+}: {
+  relay?: RelayResult;
+  destination: Destination;
+  destinationTxHash?: string;
+  destinationAmountFormatted?: string;
+}) {
+  if (!relay || relay.status !== "relayed") return null;
+
+  const recipientLabel =
+    destination.type === "solana" ? "Solana" : CHAIN_LABEL[destination.chainId];
+
+  // Same-chain: relayTxHash IS the final transfer. Cross-chain: use the
+  // real destination-chain tx (swapDetails.destinationChainTxHashes from
+  // 1Click's /v0/status — confirmed live against a real completed
+  // invoice), not the origin-chain relay/deposit hash.
+  const finalTxHash = relay.mode === "same-chain" ? relay.relayTxHash : destinationTxHash;
+
+  // Same-chain: no bridging fee at all, the full relayed amount lands
+  // exactly. Cross-chain: use 1Click's confirmed net amount once
+  // available (swapDetails.amountOutFormatted), since that's after their
+  // bridging fee — falls back to the relay's own amount if not loaded yet.
+  const landedAmountFormatted =
+    relay.mode === "same-chain"
+      ? formatUnits(BigInt(relay.amount), 6)
+      : (destinationAmountFormatted ?? formatUnits(BigInt(relay.amount), 6));
+
+  const finalLink = (() => {
+    if (!finalTxHash) return undefined;
+    if (destination.type === "solana") {
+      return `https://solscan.io/tx/${finalTxHash}`;
+    }
+    const chain = CHAINS.find((c) => c.id === destination.chainId);
+    const base = chain?.blockExplorers?.default.url.replace(/\/$/, "");
+    return base ? `${base}/tx/${finalTxHash}` : undefined;
+  })();
+
   return (
     <div className="rounded-2xl border border-green-500/30 bg-green-50 p-6">
       <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-green-300 mb-3">
@@ -342,30 +401,25 @@ function PaidCard({ relay }: { relay?: RelayResult }) {
         Landed
       </div>
       <div className="text-sm text-ink-dim leading-relaxed">
-        Forwarded to the payee, gaslessly.
+        {landedAmountFormatted} USDC forwarded to the payee on {recipientLabel}, gaslessly.
       </div>
-      {txHash && (
-        <span className="mt-2 inline-flex items-center gap-1 text-[11px] text-amber-400 font-mono break-all">
-          {txHash}
-        </span>
+      <div className="mt-3 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
+        Paid to
+      </div>
+      <div className="mt-1 font-mono text-xs text-ink break-all">
+        {destination.address}
+      </div>
+      {finalLink && (
+        <a
+          href={finalLink}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-3 inline-flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium"
+        >
+          View final transaction
+          <ExternalLink className="h-3 w-3" />
+        </a>
       )}
-    </div>
-  );
-}
-
-function AutopayNote() {
-  return (
-    <div className="rounded-2xl border border-line bg-surface p-6">
-      <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint mb-3">
-        <Info className="h-3.5 w-3.5" />
-        How this works
-      </div>
-      <p className="text-sm text-ink-dim leading-relaxed">
-        This address is watched continuously. The moment USDC arrives on
-        any gate, it's forwarded to the payee automatically — same-chain
-        transfers go straight through, cross-chain ones route via a
-        third-party settlement network. No gas ever required from you.
-      </p>
     </div>
   );
 }
@@ -511,23 +565,6 @@ function ProgressStep({
 function formatAmount(amount?: bigint): string {
   if (amount === undefined) return "—";
   return `${formatUnits(amount, 6)} USDC`;
-}
-
-function SecurityNote() {
-  return (
-    <div className="rounded-2xl border border-line bg-surface p-6">
-      <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint mb-3">
-        <ShieldCheck className="h-3.5 w-3.5" />
-        Security
-      </div>
-      <p className="text-sm text-ink-dim leading-relaxed">
-        This address is deterministically derived and controlled by a
-        signing key that never touches the browser. It only ever forwards
-        to the payee address fixed at invoice creation — nothing else can
-        be done with it.
-      </p>
-    </div>
-  );
 }
 
 function StatusBadge({ status }: { status: "paid" | "awaiting" }) {

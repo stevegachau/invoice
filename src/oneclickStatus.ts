@@ -7,6 +7,20 @@ export type OneClickStatus =
   | "REFUNDED"
   | "FAILED";
 
+export type OneClickStatusResponse = {
+  status: OneClickStatus;
+  swapDetails?: {
+    amountOutFormatted?: string;
+    originChainTxHashes?: { hash: string; explorerUrl: string }[];
+    // Confirmed live against a real completed invoice — this is the
+    // actual step-3 delivery tx, not the origin-chain relay/deposit hash.
+    // `explorerUrl` came back empty in that response, so the link shown
+    // to the user is built from our own chain config instead of trusting
+    // this field.
+    destinationChainTxHashes?: { hash: string; explorerUrl: string }[];
+  };
+};
+
 function apiBaseUrl(): string {
   const url = (import.meta.env as Record<string, string | undefined>)
     .VITE_RELAY_API_URL;
@@ -19,13 +33,11 @@ function apiBaseUrl(): string {
 }
 
 // Proxied through our own backend rather than calling
-// 1click.chaindefuser.com directly from the browser — a plain fetch() is
-// subject to CORS, and if that API doesn't send permissive CORS headers on
-// /v0/status, polling attempts fail silently and never converge. Our
-// backend hits it server-to-server, no such restriction.
+// 1click.chaindefuser.com directly from the browser, to avoid any
+// possible CORS restriction on a direct browser fetch().
 export async function fetchOneClickStatus(
   depositAddress: string,
-): Promise<{ status: OneClickStatus }> {
+): Promise<OneClickStatusResponse> {
   const res = await fetch(apiBaseUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },

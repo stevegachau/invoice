@@ -10,6 +10,7 @@ export type RelayResult =
   | {
       status: "relayed";
       mode: "same-chain";
+      chainId: SupportedChainId;
       address: Address;
       amount: string;
       relayTxHash: string;
@@ -17,6 +18,7 @@ export type RelayResult =
   | {
       status: "relayed";
       mode: "cross-chain";
+      chainId: SupportedChainId;
       address: Address;
       amount: string;
       relayTxHash: string;
@@ -69,4 +71,29 @@ export async function triggerRelay(params: {
   destination: Destination;
 }): Promise<RelayResult> {
   return callApi<RelayResult>({ action: "relay", ...params });
+}
+
+export type PreviewQuote = {
+  amountIn?: string;
+  amountOut?: string;
+  amountOutFormatted?: string;
+  amountOutUsd?: string;
+  timeEstimate?: number;
+};
+
+/** Dry-run quote — no real deposit address reserved, just fee/fill
+ * estimate. Used by the invoice form to show an approximate cross-chain
+ * fee before the invoice is even issued (same-chain payments are always
+ * free — this isn't called for that case). */
+export async function previewQuote(params: {
+  originChainId: SupportedChainId;
+  destination: Destination;
+  amount: bigint;
+}): Promise<PreviewQuote> {
+  return callApi<PreviewQuote>({
+    action: "previewQuote",
+    originChainId: params.originChainId,
+    destination: params.destination,
+    amount: params.amount.toString(),
+  });
 }

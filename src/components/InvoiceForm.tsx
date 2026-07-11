@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isAddress, parseUnits, type Address } from "viem";
 import {
   AlertCircle,
@@ -14,7 +14,7 @@ import {
 import { CHAINS, CHAIN_LABEL, type SupportedChainId } from "../chains";
 import { issueInvoice, type IssuedInvoice } from "../invoice";
 import { isValidSolanaPubkey } from "../solana";
-import type { Destination } from "../relayApi";
+import { previewQuote, type Destination, type PreviewQuote } from "../relayApi";
 import { GateDot, gateLetter, SOLANA_GATE_ID, type GateId } from "./GateBadge";
 
 const GATES: GateId[] = [...CHAINS.map((c) => c.id), SOLANA_GATE_ID];
@@ -44,6 +44,62 @@ export function InvoiceForm({
   })();
   const validCompany = companyName.trim().length > 0;
   const canSubmit = validAddress && validAmount && validCompany && !busy;
+
+  const [preview, setPreview] = useState<PreviewQuote | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewFailed, setPreviewFailed] = useState(false);
+
+  // Fires once the payee address is valid (and on subsequent amount/gate
+  // changes) — debounced so it doesn't fire on every keystroke. Since the
+  // payer's actual origin chain isn't known yet at this point, this quotes
+  // a representative "if paid from a different gate" scenario (any chain
+  // other than the destination) to show what a cross-chain bridging fee
+  // would look like. Same-gate payments are always free — no quote is
+  // needed to know that.
+  useEffect(() => {
+    if (!validAddress || !validAmount) {
+      setPreview(null);
+      setPreviewFailed(false);
+      return;
+    }
+
+    const previewOriginChainId =
+      CHAINS.find((c) => c.id !== destinationGate)?.id ?? CHAINS[0].id;
+    const destination: Destination = isSolana
+      ? { type: "solana", address: payee }
+      : {
+          type: "evm",
+          chainId: destinationGate as SupportedChainId,
+          address: payee as Address,
+        };
+
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewFailed(false);
+
+    const t = setTimeout(async () => {
+      try {
+        const result = await previewQuote({
+          originChainId: previewOriginChainId,
+          destination,
+          amount: parseUnits(amount, 6),
+        });
+        if (!cancelled) setPreview(result);
+      } catch {
+        if (!cancelled) {
+          setPreview(null);
+          setPreviewFailed(true);
+        }
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [validAddress, validAmount, payee, amount, destinationGate, isSolana]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -245,7 +301,19 @@ export function InvoiceForm({
             value={`Gate ${gateLetter(destinationGate)} · ${gateLabel(destinationGate)}`}
             tag={<GateDot id={destinationGate} />}
           />
-          <SummaryRow label="Network fee" value="Sponsored" accent="green" />
+          <SummaryRow label="Same-gate fee" value="Sponsored" accent="green" />
+          <SummaryRow
+            label="Other gates"
+            value={
+              previewLoading
+                ? "Estimating…"
+                : preview?.amountOutFormatted
+                  ? `~${preview.amountOutFormatted} USDC arrives`
+                  : previewFailed
+                    ? "Estimate unavailable"
+                    : "Enter payee address"
+            }
+          />
         </div>
       </section>
 
