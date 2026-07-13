@@ -3,7 +3,8 @@ import type { SupportedChainId } from "./chains";
 
 export type Destination =
   | { type: "evm"; chainId: SupportedChainId; address: Address }
-  | { type: "solana"; address: string };
+  | { type: "solana"; address: string }
+  | { type: "robinhood"; address: Address }; // USDG on Robinhood Chain — destination only, no same-chain relay path (see invoice-relay-fn)
 
 export type RelayResult =
   | { status: "no-balance"; address: Address }
@@ -22,8 +23,8 @@ export type RelayResult =
       address: Address;
       amount: string;
       relayTxHash: string;
-      oneClickDepositAddress: string;
-      oneClickAmountOutEstimate?: string;
+      bridgeDepositAddress: string;
+      bridgeAmountOutEstimate?: string;
     };
 
 function apiBaseUrl(): string {

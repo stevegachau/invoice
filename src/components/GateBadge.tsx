@@ -2,13 +2,15 @@ import { base, arbitrum, polygon } from "viem/chains";
 import type { SupportedChainId } from "../chains";
 
 export const SOLANA_GATE_ID = "solana" as const;
-export type GateId = SupportedChainId | typeof SOLANA_GATE_ID;
+export const ROBINHOOD_GATE_ID = "robinhood" as const;
+export type GateId = SupportedChainId | typeof SOLANA_GATE_ID | typeof ROBINHOOD_GATE_ID;
 
 const CHAIN_THEME: Record<GateId, { dot: string; abbr: string; gate: string }> = {
   [base.id]: { dot: "#5b8cff", abbr: "Base", gate: "A" },
   [arbitrum.id]: { dot: "#57b7f5", abbr: "Arb", gate: "B" },
   [polygon.id]: { dot: "#b18aff", abbr: "Pol", gate: "C" },
   [SOLANA_GATE_ID]: { dot: "#14f195", abbr: "Sol", gate: "D" },
+  [ROBINHOOD_GATE_ID]: { dot: "#00C805", abbr: "Robinhood", gate: "E" }, // Robinhood's brand green
 };
 
 export function gateLetter(id: GateId): string {

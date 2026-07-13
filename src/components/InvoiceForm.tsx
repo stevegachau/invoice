@@ -15,12 +15,14 @@ import { CHAINS, CHAIN_LABEL, type SupportedChainId } from "../chains";
 import { issueInvoice, type IssuedInvoice } from "../invoice";
 import { isValidSolanaPubkey } from "../solana";
 import { previewQuote, type Destination, type PreviewQuote } from "../relayApi";
-import { GateDot, gateLetter, SOLANA_GATE_ID, type GateId } from "./GateBadge";
+import { GateDot, gateLetter, SOLANA_GATE_ID, ROBINHOOD_GATE_ID, type GateId } from "./GateBadge";
 
-const GATES: GateId[] = [...CHAINS.map((c) => c.id), SOLANA_GATE_ID];
+const GATES: GateId[] = [...CHAINS.map((c) => c.id), SOLANA_GATE_ID, ROBINHOOD_GATE_ID];
 
 function gateLabel(id: GateId): string {
-  return id === SOLANA_GATE_ID ? "Solana" : CHAIN_LABEL[id as SupportedChainId];
+  if (id === SOLANA_GATE_ID) return "Solana";
+  if (id === ROBINHOOD_GATE_ID) return "Robinhood";
+  return CHAIN_LABEL[id as SupportedChainId];
 }
 
 export function InvoiceForm({
@@ -37,6 +39,13 @@ export function InvoiceForm({
   const [error, setError] = useState<string | null>(null);
 
   const isSolana = destinationGate === SOLANA_GATE_ID;
+  const isRobinhood = destinationGate === ROBINHOOD_GATE_ID;
+  // Solana and Robinhood are both destination-only — there's no "send from
+  // the same gate you're settling to" option for either, unlike the 3 EVM
+  // gates. The "Same-gate fee: Sponsored" summary row only makes sense when
+  // that option actually exists.
+  const hasSameGateOption = !isSolana && !isRobinhood;
+  const destUnit = isRobinhood ? "USDG" : "USDC";
   const validAddress = isSolana ? isValidSolanaPubkey(payee) : isAddress(payee);
   const validAmount = (() => {
     const n = Number(amount);
@@ -44,6 +53,19 @@ export function InvoiceForm({
   })();
   const validCompany = companyName.trim().length > 0;
   const canSubmit = validAddress && validAmount && validCompany && !busy;
+
+  // Shared between the preview-quote effect and the actual submit — one
+  // place to build a Destination from the current gate + payee, so the
+  // three destination types stay in sync as new ones get added.
+  function buildDestination(): Destination {
+    if (isSolana) return { type: "solana", address: payee };
+    if (isRobinhood) return { type: "robinhood", address: payee as Address };
+    return {
+      type: "evm",
+      chainId: destinationGate as SupportedChainId,
+      address: payee as Address,
+    };
+  }
 
   const [preview, setPreview] = useState<PreviewQuote | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -55,7 +77,8 @@ export function InvoiceForm({
   // a representative "if paid from a different gate" scenario (any chain
   // other than the destination) to show what a cross-chain bridging fee
   // would look like. Same-gate payments are always free — no quote is
-  // needed to know that.
+  // needed to know that. Robinhood is destination-only, so it always uses
+  // this cross-chain preview path — there's no same-gate case for it.
   useEffect(() => {
     if (!validAddress || !validAmount) {
       setPreview(null);
@@ -65,13 +88,7 @@ export function InvoiceForm({
 
     const previewOriginChainId =
       CHAINS.find((c) => c.id !== destinationGate)?.id ?? CHAINS[0].id;
-    const destination: Destination = isSolana
-      ? { type: "solana", address: payee }
-      : {
-          type: "evm",
-          chainId: destinationGate as SupportedChainId,
-          address: payee as Address,
-        };
+    const destination = buildDestination();
 
     let cancelled = false;
     setPreviewLoading(true);
@@ -99,7 +116,8 @@ export function InvoiceForm({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [validAddress, validAmount, payee, amount, destinationGate, isSolana]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validAddress, validAmount, payee, amount, destinationGate, isSolana, isRobinhood]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -107,13 +125,7 @@ export function InvoiceForm({
     setBusy(true);
     setError(null);
     try {
-      const destination: Destination = isSolana
-        ? { type: "solana", address: payee }
-        : {
-            type: "evm",
-            chainId: destinationGate as SupportedChainId,
-            address: payee as Address,
-          };
+      const destination = buildDestination();
 
       const issued = await issueInvoice(
         { destination, amount: parseUnits(amount, 6) },
@@ -196,17 +208,18 @@ export function InvoiceForm({
               />
             </div>
             <div className="mt-1.5 text-xs text-ink-dim tabular font-mono">
-              ≈ {formattedAmount} USDC
+              ≈ {formattedAmount} {destUnit}
             </div>
           </div>
           <span className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-green-50 ring-1 ring-green-500/30 text-green-300 text-xs font-mono font-medium">
             <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-            USDC
+            {destUnit}
           </span>
         </div>
         <p className="mt-2 text-[11px] text-ink-faint">
-          Whatever actually arrives gets forwarded — this amount is just
-          what shows on the invoice.
+          {isRobinhood
+            ? "Payer still sends USDC — delivered to you as USDG on Robinhood Chain."
+            : "Whatever actually arrives gets forwarded — this amount is just what shows on the invoice."}
         </p>
       </section>
 
@@ -253,6 +266,13 @@ export function InvoiceForm({
             Solana wallet.
           </p>
         )}
+        {isRobinhood && (
+          <p className="mt-2 text-[11px] text-ink-faint leading-relaxed">
+            Payer still sends USDC from any of the 3 EVM gates — Robinhood
+            Chain is a settlement destination, funds bridge and convert to
+            USDG automatically.
+          </p>
+        )}
       </section>
 
       <section className="px-7 pt-6">
@@ -292,20 +312,22 @@ export function InvoiceForm({
       <section className="px-7 pt-6">
         <div className="rounded-xl bg-surface-2 border border-dashed border-line p-4 space-y-2 text-sm">
           <SummaryRow label="From" value={companyName.trim() || "—"} />
-          <SummaryRow label="Amount" value={`${formattedAmount} USDC`} />
+          <SummaryRow label="Amount" value={`${formattedAmount} ${destUnit}`} />
           <SummaryRow
             label="Settles at"
             value={`Gate ${gateLetter(destinationGate)} · ${gateLabel(destinationGate)}`}
             tag={<GateDot id={destinationGate} />}
           />
-          <SummaryRow label="Same-gate fee" value="Sponsored" accent="green" />
+          {hasSameGateOption && (
+            <SummaryRow label="Same-gate fee" value="Sponsored" accent="green" />
+          )}
           <SummaryRow
-            label="Other gates"
+            label={hasSameGateOption ? "Other gates" : "Delivers as"}
             value={
               previewLoading
                 ? "Estimating…"
                 : preview?.amountOutFormatted
-                  ? `~${preview.amountOutFormatted} USDC arrives`
+                  ? `~${preview.amountOutFormatted} ${destUnit} arrives`
                   : previewFailed
                     ? "Estimate unavailable"
                     : "Enter payee address"

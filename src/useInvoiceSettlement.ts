@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { createPublicClient, erc20Abi, fallback, http, type Address, type Hex } from "viem";
 import { CHAINS, RPC_URLS, USDC, BLOCK_TIME_MS, type SupportedChainId } from "./chains";
 import { triggerRelay, type Destination, type RelayResult } from "./relayApi";
-import { fetchOneClickStatus, type OneClickStatus } from "./oneclickStatus";
+import { fetchBridgeStatus, type BridgeStatus } from "./bridgeStatus";
 
 export type InvoiceSettlement = {
   source?: { chainId: SupportedChainId; txHash?: Hex; amount?: bigint };
   relay?: RelayResult;
-  oneClickStatus?: OneClickStatus;
-  // The real step-3 delivery tx on the destination chain, once 1Click
+  bridgeStatus?: BridgeStatus;
+  // The real step-3 delivery tx on the destination chain, once Relay
   // reports it (confirmed live under swapDetails.destinationChainTxHashes)
   // — distinct from relay.relayTxHash, which for a cross-chain relay is
   // only the step-2 bridge deposit on the origin chain.
@@ -23,7 +23,7 @@ export type InvoiceSettlement = {
 };
 
 const POLL_MS = 8000;
-const ONE_CLICK_POLL_MS = 5000;
+const BRIDGE_POLL_MS = 5000;
 const ISSUE_CLOCK_SKEW_MS = 60_000;
 const RELAY_RETRY_LIMIT = 2;
 
@@ -87,9 +87,9 @@ export function useInvoiceSettlement(
   // step 1, and outflow (from invoiceAddress) to detect a relay that
   // already happened — even with zero cached state. An outbound transfer
   // is just as permanent a fact on-chain as an inbound one, so this makes
-  // settlement state fully re-derivable from the chain (+ 1Click) alone,
+  // settlement state fully re-derivable from the chain (+ Relay) alone,
   // rather than depending on the hash having captured the result. For a
-  // cross-chain relay, the outbound's `to` address IS the 1Click deposit
+  // cross-chain relay, the outbound's `to` address IS the Relay deposit
   // address — recovered directly, no separate lookup needed.
   useEffect(() => {
     if (state.relay) return; // already resolved, stop scanning
@@ -213,7 +213,7 @@ export function useInvoiceSettlement(
                   address: invoiceAddress,
                   amount: outAmount.toString(),
                   relayTxHash: first.transactionHash ?? "",
-                  oneClickDepositAddress: toAddr,
+                  bridgeDepositAddress: toAddr,
                 },
                 complete: false,
               };
@@ -279,27 +279,26 @@ export function useInvoiceSettlement(
   }
 
   // Same-chain relays are already complete the moment they're detected.
-  // Cross-chain relays need 1Click's own status polled until SUCCESS.
+  // Cross-chain relays need Relay's own status polled until "success".
   useEffect(() => {
     if (!state.relay || state.relay.status !== "relayed") return;
     if (state.relay.mode === "same-chain" || state.complete) return;
 
     let cancelled = false;
-    const depositAddress = state.relay.oneClickDepositAddress;
+    const depositAddress = state.relay.bridgeDepositAddress;
 
     async function tick() {
       if (cancelled) return;
       try {
-        const result = await fetchOneClickStatus(depositAddress);
-        const destTxHash = result.swapDetails?.destinationChainTxHashes?.[0]?.hash;
+        const result = await fetchBridgeStatus(depositAddress);
         setState((prev) => ({
           ...prev,
-          oneClickStatus: result.status,
-          destinationTxHash: destTxHash ?? prev.destinationTxHash,
+          bridgeStatus: result.status,
+          destinationTxHash: result.destinationTxHash ?? prev.destinationTxHash,
           destinationAmountFormatted:
-            result.swapDetails?.amountOutFormatted ?? prev.destinationAmountFormatted,
+            result.amountOutFormatted ?? prev.destinationAmountFormatted,
         }));
-        if (result.status === "SUCCESS") {
+        if (result.status === "success") {
           setState((prev) => ({ ...prev, complete: true }));
         }
       } catch {
@@ -308,7 +307,7 @@ export function useInvoiceSettlement(
     }
 
     tick();
-    const interval = setInterval(tick, ONE_CLICK_POLL_MS);
+    const interval = setInterval(tick, BRIDGE_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);

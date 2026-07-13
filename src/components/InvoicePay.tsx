@@ -21,7 +21,7 @@ import {
 import { CHAINS, CHAIN_LABEL, USDC, type SupportedChainId } from "../chains";
 import type { IssuedInvoice } from "../invoice";
 import type { Destination, RelayResult } from "../relayApi";
-import { GateDot, GateBadge, gateLetter, SOLANA_GATE_ID, type GateId } from "./GateBadge";
+import { GateDot, GateBadge, gateLetter, SOLANA_GATE_ID, ROBINHOOD_GATE_ID, type GateId } from "./GateBadge";
 import { SplitFlap } from "./SplitFlap";
 import { buildShareUrl, encodeInvoiceHash } from "../share";
 import { useInvoiceSettlement } from "../useInvoiceSettlement";
@@ -42,7 +42,11 @@ export function InvoicePay({
   const amountStr = formatUnits(issued.invoice.amount, 6);
   const destination = issued.invoice.destination;
   const destGateId: GateId =
-    destination.type === "solana" ? SOLANA_GATE_ID : destination.chainId;
+    destination.type === "solana"
+      ? SOLANA_GATE_ID
+      : destination.type === "robinhood"
+        ? ROBINHOOD_GATE_ID
+        : destination.chainId;
 
   const settlement = useInvoiceSettlement(
     issued.invoiceId,
@@ -57,7 +61,7 @@ export function InvoicePay({
   // Persist the relay result into the URL hash so reopening the link
   // reflects it — and re-persist once `complete` flips true, so a fully
   // settled invoice shows "Landed" instantly on reopen instead of forcing
-  // a fresh 1Click poll every single time.
+  // a fresh bridge-status poll every single time.
   useEffect(() => {
     if (settlement.relay && settlement.relay.status === "relayed") {
       window.location.hash = "#" + encodeInvoiceHash(issued, settlement.relay);
@@ -415,18 +419,24 @@ function PaidCard({
   if (!relay || relay.status !== "relayed") return null;
 
   const recipientLabel =
-    destination.type === "solana" ? "Solana" : CHAIN_LABEL[destination.chainId];
+    destination.type === "solana"
+      ? "Solana"
+      : destination.type === "robinhood"
+        ? "Robinhood Chain"
+        : CHAIN_LABEL[destination.chainId];
+
+  const landedUnit = destination.type === "robinhood" ? "USDG" : "USDC";
 
   // Same-chain: relayTxHash IS the final transfer. Cross-chain: use the
-  // real destination-chain tx (swapDetails.destinationChainTxHashes from
-  // 1Click's /v0/status — confirmed live against a real completed
-  // invoice), not the origin-chain relay/deposit hash.
+  // real destination-chain tx (from Relay's status endpoint — confirmed
+  // live against real completed invoices), not the origin-chain
+  // relay/deposit hash.
   const finalTxHash = relay.mode === "same-chain" ? relay.relayTxHash : destinationTxHash;
 
   // Same-chain: no bridging fee at all, the full relayed amount lands
-  // exactly. Cross-chain: use 1Click's confirmed net amount once
-  // available (swapDetails.amountOutFormatted), since that's after their
-  // bridging fee — falls back to the relay's own amount if not loaded yet.
+  // exactly. Cross-chain: use Relay's confirmed net amount once available
+  // (from their status endpoint), since that's after their bridging fee
+  // — falls back to the relay's own amount if not loaded yet.
   const landedAmountFormatted =
     relay.mode === "same-chain"
       ? formatUnits(BigInt(relay.amount), 6)
@@ -436,6 +446,9 @@ function PaidCard({
     if (!finalTxHash) return undefined;
     if (destination.type === "solana") {
       return `https://solscan.io/tx/${finalTxHash}`;
+    }
+    if (destination.type === "robinhood") {
+      return `https://robinhoodchain.blockscout.com/tx/${finalTxHash}`;
     }
     const chain = CHAINS.find((c) => c.id === destination.chainId);
     const base = chain?.blockExplorers?.default.url.replace(/\/$/, "");
@@ -449,7 +462,7 @@ function PaidCard({
         Landed
       </div>
       <div className="text-sm text-ink-dim leading-relaxed">
-        {landedAmountFormatted} USDC forwarded to the payee on {recipientLabel}.
+        {landedAmountFormatted} {landedUnit} forwarded to the payee on {recipientLabel}.
       </div>
       <div className="mt-3 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
         Paid to
@@ -526,7 +539,7 @@ function SettlementProgress({
       detail: settlement.complete
         ? "Confirmed"
         : relayed && !isSameChain
-          ? (settlement.oneClickStatus ?? "Awaiting fill…")
+          ? (settlement.bridgeStatus ?? "Awaiting fill…")
           : "Pending",
     },
   ];
