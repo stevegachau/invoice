@@ -476,7 +476,13 @@ function SettlementProgress({
     boardStatus === "SETTLED" ? "green" : boardStatus === "AWAITING" ? "ink" : "amber";
 
   const relayed = settlement.relay?.status === "relayed" ? settlement.relay : undefined;
-  const isSameChain = relayed?.mode === "same-chain";
+  // Known as soon as we see the origin: paying from Arc is same-chain (no
+  // bridge), whatever the relay result says. Deriving this from the source
+  // chain — not the relay result, which lands a few seconds later — avoids a
+  // brief "Bridging to Arc" flash on an Arc->Arc payment.
+  const isSameChain =
+    relayed?.mode === "same-chain" ||
+    settlement.source?.chainId === SETTLEMENT_CHAIN_ID;
 
   const receivedStep = {
     done: !!settlement.source,
