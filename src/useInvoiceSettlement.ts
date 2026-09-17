@@ -8,17 +8,11 @@ export type InvoiceSettlement = {
   source?: { chainId: SupportedChainId; txHash?: Hex; amount?: bigint };
   relay?: RelayResult;
   bridgeStatus?: BridgeStatus;
-  // The real step-3 delivery tx on the destination chain, once Relay
-  // reports it (confirmed live under swapDetails.destinationChainTxHashes)
-  // — distinct from relay.relayTxHash, which for a cross-chain relay is
-  // only the step-2 bridge deposit on the origin chain.
+  // Final delivery tx on Arc (cross-chain), reported by Relay's status.
   destinationTxHash?: string;
   destinationAmountFormatted?: string;
   complete: boolean;
-  // Set only if we saw a real inflow but couldn't resolve an outcome after
-  // retrying — should be rare now that outbound transfers are also watched
-  // (see below), since that recovers the outcome directly from chain
-  // history without needing a cached relay result at all.
+  // Saw an inflow but couldn't resolve an outcome after retrying.
   unconfirmed?: boolean;
 };
 
@@ -26,14 +20,6 @@ const POLL_MS = 8000;
 const BRIDGE_POLL_MS = 5000;
 const ISSUE_CLOCK_SKEW_MS = 60_000;
 const RELAY_RETRY_LIMIT = 2;
-
-// Fixed, conservative chunk size — no fan-out. The previous version
-// recursively halved the range in parallel (Promise.all) on any failure,
-// which on a large initial catch-up window could fire many simultaneous
-// requests at once. This scans sequentially, one chunk at a time: slower
-// for a big catch-up range (only happens once, on first mount), but never
-// a burst. Steady-state ticks after that are tiny (a few seconds' worth
-// of blocks) and need only one request.
 const LOG_CHUNK_BLOCKS = 2000n;
 
 async function scanLogsSequential<T>(
@@ -77,23 +63,15 @@ export function useInvoiceSettlement(
     return {
       relay: cachedRelay,
       source: { chainId: cachedRelay.chainId, amount: BigInt(cachedRelay.amount) },
-      // Same-chain (Arc->Arc via Arcus) is done the moment it's relayed. A
-      // cross-chain relay isn't complete until Relay confirms the Arc-side
-      // fill — the bridge-status effect below picks that up.
+      // Same-chain is done once relayed; cross-chain waits on bridge status.
       complete: cachedRelay.mode === "same-chain",
     };
   });
   const relayAttempts = useRef<Map<SupportedChainId, number>>(new Map());
   const relayInFlight = useRef<Set<SupportedChainId>>(new Set());
 
-  // Watches BOTH directions on all 3 chains: inflow (to invoiceAddress) for
-  // step 1, and outflow (from invoiceAddress) to detect a relay that
-  // already happened — even with zero cached state. An outbound transfer
-  // is just as permanent a fact on-chain as an inbound one, so this makes
-  // settlement state fully re-derivable from the chain (+ Relay) alone,
-  // rather than depending on the hash having captured the result. For a
-  // cross-chain relay, the outbound's `to` address IS the Relay deposit
-  // address — recovered directly, no separate lookup needed.
+  // Watch each origin for inflow (to the invoice address) and outflow (a
+  // settlement that already happened), so state is re-derivable from chain.
   useEffect(() => {
     if (state.relay) return; // already resolved, stop scanning
 
@@ -179,13 +157,8 @@ export function useInvoiceSettlement(
           }
 
           if (outflows.length > 0) {
-            // An outbound transfer means the balance was already relayed.
-            // Recovered directly from chain history, so settlement state is
-            // re-derivable even with zero cached state.
-            //   - origin is Arc + `to` is the merchant  -> same-chain
-            //     settle (via Arcus). Complete: this IS the final tx.
-            //   - otherwise -> cross-chain: `to` is the Relay deposit
-            //     address that bridges to Arc.
+            // Outflow means it was already settled: Arc + to-merchant is
+            // same-chain; otherwise `to` is the Relay deposit address.
             const first = outflows[0];
             const outAmount = first.args.value ?? 0n;
             const toAddr = first.args.to as Address;
@@ -233,12 +206,8 @@ export function useInvoiceSettlement(
             // rather than just waiting to notice one.
             void maybeTriggerRelay(chainId);
           } else if (Number(chainId) === SETTLEMENT_CHAIN_ID) {
-            // Arc balance fallback. On Arc, USDC is the native gas asset, so
-            // a payer's "send USDC" is a plain value transfer that emits NO
-            // ERC-20 Transfer event on 0x3600 (that contract is a view over
-            // the native balance). The log scan above therefore never sees
-            // an Arc deposit — so check the live balance directly and treat
-            // any funds sitting here as an inflow to relay.
+            // On Arc, USDC is the native gas asset, so a deposit emits no
+            // ERC-20 Transfer event — check the live balance directly.
             const bal = await client.readContract({
               address: USDC[chainId],
               abi: erc20Abi,
@@ -282,18 +251,13 @@ export function useInvoiceSettlement(
     try {
       const result = await triggerRelay({ invoiceId, chainId, destination });
       if (result.status === "relayed") {
-        // Same-chain (Arc->Arc) is settled the moment this returns; a
-        // cross-chain relay still needs its Arc-side fill confirmed, so
-        // leave `complete` for the bridge-status effect.
+        // Same-chain is settled immediately; cross-chain waits on bridge status.
         setState((prev) =>
           prev.relay
             ? prev
             : { ...prev, relay: result, complete: result.mode === "same-chain" },
         );
       } else if (attempts + 1 >= RELAY_RETRY_LIMIT) {
-        // Kept saying no-balance after we saw a real inflow. The outbound
-        // scan above is the real safety net now — this only fires if that
-        // somehow hasn't caught up yet either.
         setState((prev) => (prev.relay ? prev : { ...prev, unconfirmed: true }));
       } else {
         setTimeout(() => {
@@ -314,9 +278,7 @@ export function useInvoiceSettlement(
     relayInFlight.current.delete(chainId);
   }
 
-  // Cross-chain relays need Relay's status polled by deposit address until
-  // it reports the Arc-side fill as "success". Same-chain (Arc->Arc) is
-  // already complete when detected, so there's nothing to poll.
+  // Cross-chain: poll Relay's status until the Arc-side fill succeeds.
   useEffect(() => {
     if (!state.relay || state.relay.status !== "relayed") return;
     if (state.relay.mode === "same-chain" || state.complete) return;

@@ -3,14 +3,11 @@ import type { IssuedInvoice } from "./invoice";
 import type { Destination, RelayResult } from "./relayApi";
 
 const HASH_PREFIX = "i=";
-const VERSION = 7; // must match the relay function's SHARE_HASH_VERSION.
-// v7: settlement is always Arc, so `dest` is now { type: "arc", address }.
-// Dropped the multi-destination (Solana/Robinhood/any-EVM) model, so v6
-// links no longer decode.
+const VERSION = 7; // must match the relay function's SHARE_HASH_VERSION
 
 type Wire = {
   v: number;
-  id: string; // invoiceId
+  id: string;
   addr: Address;
   n: string;
   t: number;
@@ -19,10 +16,7 @@ type Wire = {
   d: string;
   a: string;
   dest: Destination;
-  // Cached relay result, if we have one — lets reopening the link show
-  // "complete" immediately without re-scanning from scratch. Optional:
-  // absence just means the settlement hook re-derives it live.
-  relay?: RelayResult;
+  relay?: RelayResult; // cached settlement result, if known
 };
 
 export function encodeInvoiceHash(

@@ -49,10 +49,7 @@ export function InvoicePay({
   const complete = settlement.complete;
   const relay = settlement.relay ?? cachedRelay;
 
-  // Persist the relay result into the URL hash so reopening the link
-  // reflects it — and re-persist once `complete` flips true, so a settled
-  // invoice shows "Settled" instantly on reopen instead of forcing a fresh
-  // bridge-status poll every time.
+  // Persist the relay result into the URL hash so reopening reflects it.
   useEffect(() => {
     if (settlement.relay && settlement.relay.status === "relayed") {
       window.location.hash = "#" + encodeInvoiceHash(issued, settlement.relay);
@@ -406,14 +403,9 @@ function PaidCard({
 
   const isSameChain = relay.mode === "same-chain";
 
-  // Same-chain: relayTxHash IS the final Arc settlement tx. Cross-chain: the
-  // final delivery tx on Arc comes from Relay's status endpoint (distinct
-  // from the origin-chain deposit hash in relay.relayTxHash).
+  // Same-chain: relayTxHash is the final tx. Cross-chain: from Relay status.
   const finalTxHash = isSameChain ? relay.relayTxHash : destinationTxHash;
 
-  // Same-chain lands the full amount (no bridge fee). Cross-chain: prefer
-  // Relay's confirmed net amount on Arc; fall back to the swept amount if
-  // the status hasn't loaded yet.
   const landedAmountFormatted = isSameChain
     ? formatUnits(BigInt(relay.amount), 6)
     : (destinationAmountFormatted ?? formatUnits(BigInt(relay.amount), 6));
@@ -476,10 +468,7 @@ function SettlementProgress({
     boardStatus === "SETTLED" ? "green" : boardStatus === "AWAITING" ? "ink" : "amber";
 
   const relayed = settlement.relay?.status === "relayed" ? settlement.relay : undefined;
-  // Known as soon as we see the origin: paying from Arc is same-chain (no
-  // bridge), whatever the relay result says. Deriving this from the source
-  // chain — not the relay result, which lands a few seconds later — avoids a
-  // brief "Bridging to Arc" flash on an Arc->Arc payment.
+  // Paying from Arc is same-chain — known from the source, before the relay result.
   const isSameChain =
     relayed?.mode === "same-chain" ||
     settlement.source?.chainId === SETTLEMENT_CHAIN_ID;
@@ -690,11 +679,7 @@ function Meta({
   );
 }
 
-// ERC-681: ethereum:<token contract>@<chainId>/transfer?address=<recipient>&uint256=<amount>
-// USDC is an ERC-20, so the URI targets the token contract's transfer()
-// function, not the recipient directly. Wallet support for this exact form
-// varies — well-supported in MetaMask mobile, but some wallets only handle
-// the plain native-currency variant and may ignore this.
+// ERC-681 token-transfer deep link (support varies by wallet).
 function buildErc681Link(chainId: SupportedChainId, recipient: string, amount: bigint): string {
   return `ethereum:${USDC[chainId]}@${chainId}/transfer?address=${recipient}&uint256=${amount.toString()}`;
 }

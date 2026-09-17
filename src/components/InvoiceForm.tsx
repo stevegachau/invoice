@@ -43,10 +43,7 @@ export function InvoiceForm({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
 
-  // Fires once the payout address is valid (and on amount changes),
-  // debounced. The payer's actual origin chain isn't known at issue time,
-  // so this quotes a representative origin (Base) -> Arc to preview how much
-  // USDC lands after Relay's bridging fee.
+  // Debounced preview quote (representative origin -> Arc).
   useEffect(() => {
     if (!validAddress || !validAmount) {
       setPreview(null);

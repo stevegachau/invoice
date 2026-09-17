@@ -13,59 +13,18 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { base, arbitrum, polygon } from "viem/chains";
 
-// x402 facilitators — the services that verify an EIP-3009 authorization and
-// submit the transfer on-chain, paying gas themselves. PayAI covers the EVM
-// origin chains; Arcus covers Arc (and is the only facilitator that does, so
-// it's what makes same-chain Arc->Arc settlement possible at all).
+// Invoice relay API. Collects USDC on Base/Arbitrum/Polygon/Arc and settles
+// it as USDC on Arc.
+
 const FACILITATOR_PAYAI = "https://facilitator.payai.network";
 const FACILITATOR_ARCUS = "https://facilitator.arcusnetwork.co";
 
-// Arc — Circle's USDC-native L1, chain id 5042 (mainnet live 2026-09-16).
-// Minimal viem chain: we only ever read balances / build a client for it,
-// never need block explorers or multicall here. USDC on Arc for x402/EIP-3009
-// is the ERC-20 representation at 0x3600…0000 (6 decimals) — the native gas
-// asset (0x0000…0000, 18 decimals) can't do transferWithAuthorization, so all
-// Arc-side movement uses the ERC-20 form.
 const arc = defineChain({
   id: 5042,
   name: "Arc",
   nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
   rpcUrls: { default: { http: ["https://rpc.mainnet.arc.io"] } },
 });
-
-// =============================================================================
-// invoice-relay — a stateless serverless function that collects USDC on Base,
-// Arbitrum, or Polygon and settles it on Arc, Circle's USDC-native L1.
-//
-// Arc is the settlement chain: every invoice is paid out in USDC on Arc, where
-// USDC is the native gas asset ("gas in dollars"). The payer sends USDC on
-// whichever origin chain they hold it on (Base / Arbitrum / Polygon); this
-// function bridges the whole balance to the merchant's Arc address via Relay
-// (relay.link). There is no same-chain path: Arc is destination-only here,
-// since it can't be an origin (no x402 facilitator covers Arc yet), and the
-// three origin chains are never themselves a settlement target.
-//
-// The mechanism:
-//   1. Each invoice gets a plain EOA address, deterministically derived from
-//      HMAC(masterSecret, invoiceId) — the same address on every origin chain
-//      for free, since it's a real keypair, not a smart-contract account. The
-//      frontend polls that address client-side across the 3 origin chains.
-//   2. When a balance shows up, this function re-derives the same keypair
-//      (pure function of invoiceId + secret — no lookup, no database) and reads
-//      the LIVE on-chain USDC balance itself (never trusts a client amount).
-//   3. It requests a Relay deposit-address quote (origin chain USDC -> Arc
-//      native USDC) and relays the entire balance to the deposit address Relay
-//      returns on the ORIGIN chain. Relay's solver network delivers USDC to the
-//      merchant on Arc.
-//   4. The origin-chain relay goes through PayAI's free x402 facilitator, which
-//      submits the on-chain tx and pays gas itself, so the invoice address
-//      never needs native gas.
-//
-// Why no database: sweeping the ENTIRE live balance (not a fixed amount) makes
-// this safely stateless. Resumability is handled by the frontend writing the
-// relay result back into the invoice's URL hash. Idempotency: a second
-// concurrent call re-reads the balance; if it's already zero, it's a no-op.
-// =============================================================================
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -74,23 +33,10 @@ class HttpError extends Error {
   }
 }
 
-// -----------------------------------------------------------------------
-// Origin chains — where payers send USDC from, and the facilitator that
-// pays the origin-side relay gas for each. Base/Arbitrum/Polygon are
-// covered by PayAI (confirmed live against its /supported endpoint);
-// Ethereum mainnet and Optimism are NOT — don't add them without a working
-// gasless-relay path. Arc is ALSO an origin now (Arcus facilitates it), so
-// a payer already on Arc can settle same-chain with no bridge; see
-// ARC_CHAIN_ID below and handleRelay's same-chain branch.
-// -----------------------------------------------------------------------
 const ARC_CHAIN_ID = 5042;
+const ARC_USDC = "0x3600000000000000000000000000000000000000"; // 6 decimals
 
-// USDC on Arc for x402/EIP-3009 is the ERC-20 representation (6 decimals),
-// not the native gas asset — see the `arc` chain note above. This is both
-// the same-chain origin token AND the cross-chain Relay settlement currency,
-// so a merchant receives the exact same asset however they were paid.
-const ARC_USDC = "0x3600000000000000000000000000000000000000";
-
+// Origin chains and their x402 facilitator.
 const SUPPORTED_CHAINS = {
   8453: {
     chain: base,
@@ -112,9 +58,8 @@ const SUPPORTED_CHAINS = {
   },
   137: {
     chain: polygon,
-    usdc: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", // native USDC, NOT bridged USDC.e
+    usdc: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
     rpcUrls: [
-      // polygon-rpc.com dropped — confirmed dead in testing.
       "https://polygon-bor-rpc.publicnode.com",
       "https://polygon.llamarpc.com",
       "https://rpc.ankr.com/polygon",
@@ -125,7 +70,7 @@ const SUPPORTED_CHAINS = {
   },
   5042: {
     chain: arc,
-    usdc: ARC_USDC, // ERC-20 USDC, 6 decimals
+    usdc: ARC_USDC,
     rpcUrls: ["https://rpc.mainnet.arc.io"],
     caip2: "eip155:5042",
     facilitator: FACILITATOR_ARCUS,
@@ -154,14 +99,6 @@ function publicClientFor(chainId) {
   });
 }
 
-// -----------------------------------------------------------------------
-// Deterministic keypair derivation
-// -----------------------------------------------------------------------
-
-// secp256k1 curve order — a valid private key must be a nonzero scalar
-// strictly less than this. HMAC-SHA256 output is uniformly random over
-// 2^256, so landing outside [1, n-1] is astronomically unlikely, but this
-// handles it correctly rather than assuming.
 const SECP256K1_ORDER =
   0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 
@@ -180,35 +117,22 @@ function deriveInvoiceAccount(masterSecret, invoiceId) {
     if (scalar > 0n && scalar < SECP256K1_ORDER) {
       return privateKeyToAccount(`0x${digest.toString("hex")}`);
     }
-    material = `${invoiceId}:${attempt}`; // vanishingly unlikely branch
+    material = `${invoiceId}:${attempt}`;
   }
   throw new Error("Failed to derive a valid private key after 8 attempts");
 }
 
-// -----------------------------------------------------------------------
-// Relay (relay.link) API — deposit-address quote + status
-// -----------------------------------------------------------------------
+// Relay (relay.link) — quotes and status.
 const RELAY_BASE = "https://api.relay.link";
 
 function relayAuthHeaders() {
-  // Optional — unauthenticated works fine for moderate volume (confirmed
-  // against their docs), an API key just raises the rate limit ceiling.
   return process.env.RELAY_API_KEY ? { "x-api-key": process.env.RELAY_API_KEY } : {};
 }
 
-// The settlement destination is always Arc — a single {chainId, currency}
-// pair. Kept as a function (rather than inlined) so the one place that
-// decides "where does USDC land" stays obvious, and so a second settlement
-// chain could be added later without hunting through the relay/quote code.
 function resolveDestinationChainAndCurrency() {
   return { chainId: ARC_CHAIN_ID, currency: ARC_USDC };
 }
 
-// The response's steps[0].depositAddress is on the ORIGIN chain — that's
-// what gets relayed to below; Relay's solver network watches it and
-// delivers to `recipient` on the destination chain automatically.
-// useDepositAddress:false (the default) gives a plain quote with no real
-// deposit address reserved — used for previewQuote.
 async function getRelayQuote({
   userAddress,
   originChainId,
@@ -243,19 +167,6 @@ async function getRelayQuote({
   return r.json();
 }
 
-// Tracked by deposit address, not requestId — this is Relay's own
-// documented best practice ("Always track transactions by deposit
-// address, not by requestId"), and it's what makes settlement tracking
-// resilient to a fresh browser reload with zero cached state: the
-// outbound Transfer event on-chain reveals the deposit address, which is
-// enough on its own to recover full status here — no need to have
-// captured requestId from the original quote response.
-//
-// "open" deposit addresses (the default, what we use) can in principle
-// receive more than one historical request — /requests/v2 returns an
-// array; sorting by updatedAt desc and taking [0] gets the most recent,
-// which is the right one for our case (single-use in practice, since each
-// invoice's balance only ever gets swept once).
 async function getRelayRequestStatus(depositAddress) {
   const url = new URL(`${RELAY_BASE}/requests/v2`);
   url.searchParams.set("depositAddress", depositAddress);
@@ -268,11 +179,7 @@ async function getRelayRequestStatus(depositAddress) {
   return r.json();
 }
 
-// -----------------------------------------------------------------------
-// x402 facilitator — EIP-3009 authorization + verify/settle. Works with any
-// x402-v2 facilitator (PayAI for the EVM origins, Arcus for Arc); the base
-// URL is passed in per call.
-// -----------------------------------------------------------------------
+// x402 facilitator — EIP-3009 authorization + verify/settle (base URL per call).
 
 const TRANSFER_WITH_AUTHORIZATION_TYPES = {
   TransferWithAuthorization: [
@@ -285,10 +192,6 @@ const TRANSFER_WITH_AUTHORIZATION_TYPES = {
   ],
 };
 
-// EIP-712 domain name/version read live from the token contract's own
-// name()/version() views rather than hardcoded — "USD Coin"/"2" is what
-// every Circle deployment uses in practice, but reading it live means a
-// wrong guess can't silently produce invalid signatures.
 async function getEip712Domain(publicClient, tokenAddress) {
   const [name, version] = await Promise.all([
     publicClient.readContract({
@@ -310,16 +213,11 @@ async function getEip712Domain(publicClient, tokenAddress) {
         ],
         functionName: "version",
       })
-      .catch(() => "2"), // some tokens omit version(); "2" is the common default
+      .catch(() => "2"),
   ]);
   return { name, version };
 }
 
-// Signs an EIP-3009 transferWithAuthorization moving `amount` from the
-// invoice's derived EOA to `to`, then relays it through the given x402
-// facilitator, which verifies the signature and submits the on-chain
-// transaction itself, paying gas. The invoice address never needs native
-// gas.
 async function relayViaFacilitator({
   facilitatorBase,
   publicClient,
@@ -333,7 +231,7 @@ async function relayViaFacilitator({
   const domain = await getEip712Domain(publicClient, tokenAddress);
   const now = Math.floor(Date.now() / 1000);
   const validAfter = now - 60;
-  const validBefore = now + 600; // 10 minutes
+  const validBefore = now + 600;
   const nonce = `0x${randomBytes(32).toString("hex")}`;
 
   const authorization = {
@@ -392,8 +290,6 @@ async function relayViaFacilitator({
   const verifyRes = await fetch(`${facilitatorBase}/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // Top-level x402Version matches Arcus's documented schema; PayAI ignores
-    // the extra field, so this body works for both facilitators.
     body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements }),
   });
   const verifyJson = await verifyRes.json();
@@ -418,13 +314,6 @@ async function relayViaFacilitator({
   return { txHash: settleJson.transaction, payer: settleJson.payer };
 }
 
-// -----------------------------------------------------------------------
-// Destination validation
-// -----------------------------------------------------------------------
-
-// The only settlement destination is Arc, which is EVM-compatible, so the
-// payout address is a plain 0x address. (No requireChainConfig lookup —
-// Arc isn't one of the origin chains this function reads balances on.)
 function validateDestination(destination) {
   if (!destination || typeof destination !== "object") {
     throw new HttpError(400, "destination is required");
@@ -443,15 +332,11 @@ function validateDestination(destination) {
   }
 }
 
-// -----------------------------------------------------------------------
 // Action handlers
-// -----------------------------------------------------------------------
 
 const MASTER_SECRET = process.env.INVOICE_MASTER_SECRET;
 
-// action: "address" — returns the invoice's deposit address. Same address
-// on all 3 supported EVM chains (plain EOA, no per-chain deployment).
-// Input: { invoiceId }
+// { invoiceId } -> { address }
 async function handleAddress(body) {
   const { invoiceId } = body;
   if (!invoiceId) throw new HttpError(400, "invoiceId is required");
@@ -459,38 +344,20 @@ async function handleAddress(body) {
   return { address: account.address };
 }
 
-// The frontend's own invoice number is display-only, derived deterministically
-// from the address — kept identical here so a link generated by this API
-// looks indistinguishable from one generated by the actual form.
 function makeInvoiceNumber(address) {
   const hash = keccak256(toBytes(address));
   const n = BigInt(hash) % 1_000_000n;
   return `INV-${n.toString().padStart(6, "0")}`;
 }
 
-// Matches the frontend's toBase64Url in share.ts exactly — both are
-// standard base64url encodings of the same UTF-8 bytes, so this and the
-// browser's btoa-based version produce byte-identical output.
 function toBase64Url(jsonString) {
   return Buffer.from(jsonString, "utf8").toString("base64url");
 }
 
 const PUBLIC_APP_URL = process.env.PUBLIC_APP_URL || "https://www.invoices.wtf";
-const SHARE_HASH_VERSION = 7; // must match share.ts's VERSION — bump both
-// together. v7 dropped multi-destination (Solana/Robinhood/any-EVM) for a
-// single Arc settlement target, so v6 links no longer decode.
+const SHARE_HASH_VERSION = 7; // must match share.ts's VERSION
 
-// action: "createInvoiceUrl" — the programmatic equivalent of filling out
-// the invoice form. Generates a random invoiceId exactly like the frontend
-// does, derives its deposit address, and returns a full URL encoding the
-// same wire format share.ts produces — so a link from this API and one
-// from the actual UI are byte-for-byte interchangeable; either can be
-// opened by the same frontend and decoded identically.
-//
-// Input: { companyName, description?, amount, destination }
-//   amount is a plain decimal string/number in USDC (e.g. "25" or 25.5),
-//   NOT atomic units — converted here the same way parseUnits(amount, 6)
-//   does on the frontend.
+// { companyName, description?, amount, destination } -> { invoiceId, invoiceNumber, url }
 async function handleCreateInvoiceUrl(body) {
   const { companyName, description, amount, destination } = body;
   if (!companyName) throw new HttpError(400, "companyName is required");
@@ -528,32 +395,11 @@ async function handleCreateInvoiceUrl(body) {
   };
 
   const url = `${PUBLIC_APP_URL}/#i=${toBase64Url(JSON.stringify(wire))}`;
-
-  // Deliberately not returning `address` here — a caller seeing the raw
-  // deposit address might reasonably assume they can watch/track it
-  // independently (their own script, a block explorer) and expect
-  // detection + relaying to happen regardless. It doesn't: that only
-  // happens because the invoice page itself is open and polling in the
-  // browser (useInvoiceSettlement) — there's no server-side watcher. The
-  // `url` is the one thing that actually works standalone.
   return { invoiceId, invoiceNumber, url };
 }
 
-// action: "relay" — re-derives the same keypair, reads the LIVE balance on
-// the given origin chain, and if there's anything there, delivers the entire
-// balance to the merchant's Arc address:
-//
-//   - origin is Arc (5042)        -> same-chain: EIP-3009 transfer straight
-//     to the merchant via Arcus. No bridge, no bridging fee.
-//   - origin is Base/Arb/Polygon  -> cross-chain: a Relay deposit-address
-//     quote (origin USDC -> Arc USDC) relayed via PayAI; Relay's solvers
-//     deliver on Arc.
-//
-// Both paths settle the same asset (Arc ERC-20 USDC), so the merchant
-// receives an identical balance regardless of how they were paid.
-//
-// Input:
-//   { invoiceId, chainId, destination: { type: "arc", address } }
+// { invoiceId, chainId, destination } -> relay result.
+// Arc origin settles same-chain; other origins bridge to Arc via Relay.
 async function handleRelay(body) {
   const { invoiceId, chainId, destination } = body;
   if (!invoiceId) throw new HttpError(400, "invoiceId is required");
@@ -574,8 +420,7 @@ async function handleRelay(body) {
     return { status: "no-balance", address: account.address };
   }
 
-  // Same-chain: payer is already on Arc, so hand the balance straight to the
-  // merchant via Arcus — no bridge involved.
+  // Same-chain (Arc): hand the balance straight to the merchant.
   if (Number(chainId) === ARC_CHAIN_ID) {
     const { txHash } = await relayViaFacilitator({
       facilitatorBase: cfg.facilitator,
@@ -598,7 +443,7 @@ async function handleRelay(body) {
     };
   }
 
-  // Cross-chain: bridge origin-chain USDC -> Arc USDC via Relay.
+  // Cross-chain: bridge to Arc via Relay.
   const { chainId: destChainId, currency: destCurrency } =
     resolveDestinationChainAndCurrency();
 
@@ -610,7 +455,7 @@ async function handleRelay(body) {
     destinationCurrency: destCurrency,
     amount: balance,
     recipient: destination.address,
-    refundTo: account.address, // if the swap fails, funds come back to this same address
+    refundTo: account.address,
     useDepositAddress: true,
   });
 
@@ -642,15 +487,7 @@ async function handleRelay(body) {
   };
 }
 
-// action: "status" — proxies a Relay status check. This exists so the
-// frontend never calls api.relay.link directly: a browser fetch() is
-// subject to CORS, and a server-to-server call from here has no such
-// restriction. Also centralizes the "track by deposit address" pattern
-// Relay recommends, rather than depending on requestId (which only ever
-// exists in the original quote response, not on-chain — see
-// useInvoiceSettlement.ts for why that distinction matters for reload
-// resilience).
-// Input: { depositAddress }
+// { depositAddress } -> Relay settlement status.
 async function handleStatus(body) {
   const { depositAddress } = body;
   if (!depositAddress) throw new HttpError(400, "depositAddress is required");
@@ -661,24 +498,14 @@ async function handleStatus(body) {
     return { status: "unknown" };
   }
 
-  // Confirmed live: the destination-chain delivery tx is under
-  // data.outTxs[0].hash once status is "success" — distinct from the
-  // origin-chain deposit tx, same distinction 1Click had between
-  // originChainTxHashes/destinationChainTxHashes.
   return {
-    status: request.status, // "waiting" | "pending" | "success" | "refund" | ...
+    status: request.status,
     destinationTxHash: request.data?.outTxs?.[0]?.hash,
     amountOutFormatted: request.data?.metadata?.currencyOut?.amountFormatted,
   };
 }
 
-// action: "previewQuote" — a quote used by the invoice form to show an
-// estimated Arc settlement amount (after Relay's bridging fee) before the
-// invoice is even issued. useDepositAddress is omitted (defaults to false)
-// — no real deposit address is reserved for a preview. The payer's actual
-// origin chain isn't known yet at invoice-creation time, so the frontend
-// picks a representative origin to illustrate the fee.
-// Input: { originChainId, destination, amount }
+// { originChainId, destination, amount } -> estimated amount received on Arc.
 async function handlePreviewQuote(body) {
   const { originChainId, destination, amount } = body;
   if (!originChainId) throw new HttpError(400, "originChainId is required");
@@ -687,9 +514,7 @@ async function handlePreviewQuote(body) {
 
   const cfg = requireChainConfig(originChainId);
 
-  // Arc origin -> Arc is same-chain: no bridge, no fee, so the full amount
-  // lands 1:1. (The form previews a cross-chain origin, so this is just a
-  // safety net for a direct Arc-origin preview.)
+  // Arc origin is same-chain: full amount, no fee.
   if (Number(originChainId) === ARC_CHAIN_ID) {
     const formatted = (Number(amount) / 1e6).toString();
     return {
@@ -704,7 +529,7 @@ async function handlePreviewQuote(body) {
     resolveDestinationChainAndCurrency();
 
   const quote = await getRelayQuote({
-    userAddress: "0x0000000000000000000000000000000000000000", // dry preview — never actually used
+    userAddress: "0x0000000000000000000000000000000000000000",
     originChainId: Number(originChainId),
     originCurrency: cfg.usdc,
     destinationChainId: destChainId,
@@ -731,15 +556,6 @@ const ACTIONS = {
   createInvoiceUrl: handleCreateInvoiceUrl,
 };
 
-// -----------------------------------------------------------------------
-// HTTP entrypoint — Vercel serverless function.
-//
-// Vercel's Node runtime hands us an Express-like (req, res): it parses a
-// JSON request body into req.body automatically, and res has .status()/
-// .json()/.setHeader() helpers. CORS headers are kept permissive so the
-// `createInvoiceUrl` action stays usable as a public programmatic API
-// (the app itself calls this same-origin and doesn't need them).
-// -----------------------------------------------------------------------
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -755,8 +571,6 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Vercel parses application/json bodies for us, but be defensive in case
-  // a raw string comes through (e.g. a missing/odd Content-Type).
   let body = req.body;
   if (typeof body === "string") {
     try {

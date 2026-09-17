@@ -1,11 +1,7 @@
 import { base, arbitrum, polygon } from "viem/chains";
 import { arc, type SupportedChainId } from "../chains";
 
-// Origin chains use cool tones; Arc — the settlement chain — is warm amber,
-// so a payment visibly converges from any cool origin into the one warm Arc
-// destination. Amber doubles as the app's "value / settled" accent. (Arc is
-// also a valid origin now, and still reads amber there, which is fine — it's
-// the same network.)
+// Origin chains use cool tones; Arc (the settlement chain) is amber.
 export type NetworkId = SupportedChainId;
 
 const THEME: Record<SupportedChainId, { dot: string; label: string }> = {

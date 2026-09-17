@@ -1,18 +1,10 @@
 import type { Address } from "viem";
 import type { SupportedChainId } from "./chains";
 
-// The only settlement destination is Arc (Circle's USDC-native L1). It's
-// EVM-compatible, so the payout is a plain 0x address. Kept as a tagged
-// object rather than a bare address so a second settlement chain could be
-// added later without changing every call site.
+// Settlement destination — always Arc.
 export type Destination = { type: "arc"; address: Address };
 
-// `chainId` is the ORIGIN the payer used. Two shapes:
-//   - same-chain: payer was already on Arc, settled directly via Arcus.
-//     relayTxHash is the final Arc settlement tx.
-//   - cross-chain: payer was on Base/Arb/Polygon; relayTxHash is the
-//     origin-chain deposit, and the Arc-side delivery is tracked by
-//     bridgeDepositAddress via the status action.
+// `chainId` is the origin the payer used.
 export type RelayResult =
   | { status: "no-balance"; address: Address }
   | {
@@ -34,11 +26,7 @@ export type RelayResult =
       bridgeAmountOutEstimate?: string;
     };
 
-// The relay backend now ships in this same repo as a Vercel serverless
-// function at /api/relay, so it's same-origin by default — no env var, no
-// CORS. VITE_RELAY_API_URL stays supported as an override for pointing at
-// a separately-hosted backend (e.g. the old Cloud Run URL) during local
-// dev or a split deploy.
+// Same-origin /api/relay by default; VITE_RELAY_API_URL overrides it.
 function apiBaseUrl(): string {
   return (
     (import.meta.env as Record<string, string | undefined>).VITE_RELAY_API_URL ??
@@ -59,8 +47,7 @@ async function callApi<T>(body: Record<string, unknown>): Promise<T> {
   return json;
 }
 
-/** Derives (or re-derives) the invoice's deposit address. Same address on
- * all 3 origin chains — it's a plain EOA, not per-chain. */
+/** The invoice's deposit address (same across all origin chains). */
 export async function getInvoiceAddress(invoiceId: string): Promise<Address> {
   const { address } = await callApi<{ address: Address }>({
     action: "address",
@@ -69,11 +56,7 @@ export async function getInvoiceAddress(invoiceId: string): Promise<Address> {
   return address;
 }
 
-/** Triggers a relay attempt for whatever's actually sitting at the invoice
- * address on `chainId` right now. The backend re-reads the live balance
- * itself — this never sends an amount, since sweeping the exact live
- * balance is what makes the whole thing safely stateless (see
- * invoice-relay-fn's README). */
+/** Triggers settlement of whatever is at the invoice address on `chainId`. */
 export async function triggerRelay(params: {
   invoiceId: string;
   chainId: SupportedChainId;
@@ -90,10 +73,7 @@ export type PreviewQuote = {
   timeEstimate?: number;
 };
 
-/** Dry-run quote — no real deposit address reserved, just an estimate of
- * how much USDC lands on Arc after Relay's bridging fee. Used by the
- * invoice form to preview the settlement amount before the invoice is
- * issued. */
+/** Estimate of how much USDC lands on Arc, for the invoice form preview. */
 export async function previewQuote(params: {
   originChainId: SupportedChainId;
   destination: Destination;
