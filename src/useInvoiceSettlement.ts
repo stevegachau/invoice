@@ -232,6 +232,25 @@ export function useInvoiceSettlement(
             // Inflow seen, no outflow yet — actively trigger a relay
             // rather than just waiting to notice one.
             void maybeTriggerRelay(chainId);
+          } else if (Number(chainId) === SETTLEMENT_CHAIN_ID) {
+            // Arc balance fallback. On Arc, USDC is the native gas asset, so
+            // a payer's "send USDC" is a plain value transfer that emits NO
+            // ERC-20 Transfer event on 0x3600 (that contract is a view over
+            // the native balance). The log scan above therefore never sees
+            // an Arc deposit — so check the live balance directly and treat
+            // any funds sitting here as an inflow to relay.
+            const bal = await client.readContract({
+              address: USDC[chainId],
+              abi: erc20Abi,
+              functionName: "balanceOf",
+              args: [invoiceAddress],
+            });
+            if (bal > 0n) {
+              setState((prev) =>
+                prev.source ? prev : { ...prev, source: { chainId, amount: bal } },
+              );
+              void maybeTriggerRelay(chainId);
+            }
           }
 
           nextFromBlock = latest + 1n;
@@ -263,7 +282,14 @@ export function useInvoiceSettlement(
     try {
       const result = await triggerRelay({ invoiceId, chainId, destination });
       if (result.status === "relayed") {
-        setState((prev) => (prev.relay ? prev : { ...prev, relay: result }));
+        // Same-chain (Arc->Arc) is settled the moment this returns; a
+        // cross-chain relay still needs its Arc-side fill confirmed, so
+        // leave `complete` for the bridge-status effect.
+        setState((prev) =>
+          prev.relay
+            ? prev
+            : { ...prev, relay: result, complete: result.mode === "same-chain" },
+        );
       } else if (attempts + 1 >= RELAY_RETRY_LIMIT) {
         // Kept saying no-balance after we saw a real inflow. The outbound
         // scan above is the real safety net now — this only fires if that
