@@ -27,15 +27,16 @@ export type RelayResult =
       bridgeAmountOutEstimate?: string;
     };
 
+// The relay backend now ships in this same repo as a Vercel serverless
+// function at /api/relay, so it's same-origin by default — no env var, no
+// CORS. VITE_RELAY_API_URL stays supported as an override for pointing at
+// a separately-hosted backend (e.g. the old Cloud Run URL) during local
+// dev or a split deploy.
 function apiBaseUrl(): string {
-  const url = (import.meta.env as Record<string, string | undefined>)
-    .VITE_RELAY_API_URL;
-  if (!url) {
-    throw new Error(
-      "VITE_RELAY_API_URL is not set — point it at the deployed invoice-relay-fn Cloud Run URL.",
-    );
-  }
-  return url;
+  return (
+    (import.meta.env as Record<string, string | undefined>).VITE_RELAY_API_URL ??
+    "/api/relay"
+  );
 }
 
 async function callApi<T>(body: Record<string, unknown>): Promise<T> {

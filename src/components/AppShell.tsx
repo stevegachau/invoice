@@ -59,7 +59,7 @@ function BottomBar() {
           All systems operational
         </span>
         <div className="flex items-center gap-4">
-          <a href="/api" className="text-ink-faint hover:text-ink transition normal-case">
+          <a href="/api-docs" className="text-ink-faint hover:text-ink transition normal-case">
             API
           </a>
           <a

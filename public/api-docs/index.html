@@ -122,14 +122,14 @@
     <h1>Invoices API</h1>
     <p>Generate cross-chain USDC invoice links programmatically. One endpoint, action-based, no API key.</p>
     <div class="base-url">
-      <span class="label">Base URL</span>
-      <code>https://api.invoices.wtf</code>
+      <span class="label">Endpoint</span>
+      <code>POST https://www.invoices.wtf/api/relay</code>
     </div>
   </header>
 
   <section>
     <h2>Create an invoice link</h2>
-    <h3><span class="method">POST</span> /</h3>
+    <h3><span class="method">POST</span> /api/relay</h3>
     <p class="desc">
       Generates an invoice exactly like the web form does — a random invoice ID, a deterministic
       deposit address derived from it, and a share URL that opens directly in the app.
@@ -160,7 +160,7 @@
     </ul>
 
     <p class="desc"><strong style="color:var(--ink)">Request</strong></p>
-    <pre><span class="k">curl</span> -X POST https://api.invoices.wtf \
+    <pre><span class="k">curl</span> -X POST https://www.invoices.wtf/api/relay \
   -H <span class="s">"Content-Type: application/json"</span> \
   -d <span class="s">'{
     "action": "createInvoiceUrl",

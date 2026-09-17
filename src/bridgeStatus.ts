@@ -15,15 +15,13 @@ export type BridgeStatusResponse = {
   amountOutFormatted?: string;
 };
 
+// Same-origin /api/relay by default (the Vercel serverless function in
+// this repo); VITE_RELAY_API_URL overrides it for a split deploy.
 function apiBaseUrl(): string {
-  const url = (import.meta.env as Record<string, string | undefined>)
-    .VITE_RELAY_API_URL;
-  if (!url) {
-    throw new Error(
-      "VITE_RELAY_API_URL is not set — point it at the deployed invoice-relay-fn Cloud Run URL.",
-    );
-  }
-  return url;
+  return (
+    (import.meta.env as Record<string, string | undefined>).VITE_RELAY_API_URL ??
+    "/api/relay"
+  );
 }
 
 // Proxied through our own backend rather than calling api.relay.link
