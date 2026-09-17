@@ -4,7 +4,7 @@ import { AppShell } from "./components/AppShell";
 import { InvoiceForm } from "./components/InvoiceForm";
 import { InvoicePay } from "./components/InvoicePay";
 import { ChainDot } from "./components/NetworkBadge";
-import { CHAINS } from "./chains";
+import { CHAINS, SETTLEMENT_CHAIN_ID } from "./chains";
 import type { IssuedInvoice } from "./invoice";
 import type { RelayResult } from "./relayApi";
 import { decodeInvoiceHash, encodeInvoiceHash } from "./share";
@@ -64,7 +64,7 @@ function Hero() {
   return (
     <section className="max-w-2xl">
       <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-50 pl-2.5 pr-3.5 py-1.5">
-        <ChainDot id="arc" />
+        <ChainDot id={SETTLEMENT_CHAIN_ID} />
         <span className="text-[11px] font-mono uppercase tracking-widest text-amber-300">
           Settles on Circle Arc
         </span>
@@ -75,9 +75,9 @@ function Hero() {
       </h1>
       <p className="mt-3 text-ink-dim text-[15px] leading-relaxed">
         Issue an invoice, share one link. Your customer pays USDC from Base,
-        Arbitrum, or Polygon — and it lands as native USDC in your account on
-        Arc, Circle's L1 for stablecoin finance. Deterministic, near-instant,
-        gas paid in dollars.
+        Arbitrum, Polygon, or Arc itself — and it lands in your account on
+        Arc, Circle's L1 for stablecoin finance. Paying from Arc settles
+        instantly with no bridge; everything else arrives in seconds.
       </p>
       <div className="mt-6 flex flex-wrap gap-2">
         <FeatureChip icon={<Zap className="h-3.5 w-3.5" />} label="Sub-second finality" />
@@ -106,11 +106,11 @@ function HowItSettles() {
     },
     {
       title: "Customer pays on any origin",
-      body: "A single deposit address, live on Base, Arbitrum, and Polygon. USDC, no wallet connect.",
+      body: "A single deposit address, live on Base, Arbitrum, Polygon, and Arc. USDC, no wallet connect.",
     },
     {
       title: "Settled on Arc",
-      body: "Bridged automatically and gaslessly to your Arc account — native USDC, spendable on arrival.",
+      body: "Bridged automatically and gaslessly to your Arc account — or settled instantly if they paid on Arc.",
     },
   ];
   return (

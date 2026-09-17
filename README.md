@@ -27,30 +27,40 @@ facilitator. Quick summary of how the two halves fit together:
 3. **On detecting inflow**, it calls the backend's `relay` action with
    `{invoiceId, chainId, destination}` (destination is always
    `{ type: "arc", address }`). The backend re-reads the live balance
-   itself (never trusts the frontend's number), requests a Relay
-   deposit-address quote (origin USDC → Arc native USDC), and relays the
-   whole balance to that deposit address through PayAI's free x402
-   facilitator, which pays the origin-chain gas. Relay's solver network
-   delivers USDC on Arc. There is no same-chain path — Arc can't be an
-   origin (no x402 facilitator covers Arc yet), so every settlement is
-   cross-chain.
-4. **Settlement** is tracked to completion by polling Relay's status
-   endpoint by deposit address (proxied through the `status` action to
-   avoid browser CORS), until it reports the Arc-side fill.
+   itself (never trusts the frontend's number) and settles by one of two
+   paths, both delivering the same Arc ERC-20 USDC:
+   - **Same-chain** (payer was already on Arc): an EIP-3009
+     `transferWithAuthorization` straight to the merchant via the **Arcus**
+     x402 facilitator. No bridge, no bridging fee.
+   - **Cross-chain** (Base/Arbitrum/Polygon): a Relay deposit-address quote
+     (origin USDC → Arc USDC), relayed to that deposit address via PayAI's
+     x402 facilitator, which pays the origin gas. Relay's solvers deliver on
+     Arc.
+4. **Settlement** — same-chain is complete the moment it's relayed;
+   cross-chain is tracked to completion by polling Relay's status endpoint
+   by deposit address (proxied through the `status` action to avoid browser
+   CORS) until it reports the Arc-side fill.
 5. **The URL hash is the only "database"** — `{invoiceId, destination,
    amount, meta}`, plus the relay result once available so reopening the
    link shows "settled" without re-scanning.
 
 ## Arc settlement notes
 
-- **Arc**: chain id `5042`, mainnet live 2026-09-16. USDC is the native
-  gas asset, addressed on Relay as the native currency (`0x0000…0000`).
-- **Origins**: Base, Arbitrum, Polygon — the chains PayAI's facilitator
-  covers gaslessly (confirmed against its `/supported` endpoint). Ethereum
-  mainnet and Optimism aren't covered and are deliberately excluded.
+- **Arc**: chain id `5042`, mainnet live 2026-09-16, ~500ms blocks. USDC
+  for transfers/EIP-3009 is the **ERC-20** representation at `0x3600…0000`
+  (6 decimals) — the native gas asset (`0x0000…0000`, 18 dec) can't do
+  EIP-3009. Both settlement paths deliver this ERC-20 USDC, so the merchant
+  receives one consistent asset however they were paid.
+- **Origins**: Base, Arbitrum, Polygon (via PayAI + Relay), and Arc itself
+  (same-chain via [Arcus](https://facilitator.arcusnetwork.co)). Ethereum
+  mainnet and Optimism aren't covered by a gasless path and are excluded.
+- **Facilitators**: PayAI (`facilitator.payai.network`) for the EVM
+  origins; Arcus (`facilitator.arcusnetwork.co`) for Arc. Arcus is the only
+  facilitator that covers Arc, so it's what makes Arc→Arc possible. If Arcus
+  is unavailable, same-chain settles fail safely — funds stay at the derived
+  address and settle on retry once it recovers.
 - Earlier destinations (Solana, Robinhood Chain) and the unused NEAR 1Click
-  status path were removed in the Arc pivot; the share-hash format is now
-  `v7` (older links no longer decode).
+  status path were removed in the Arc pivot; the share-hash format is `v7`.
 
 ## Setup
 

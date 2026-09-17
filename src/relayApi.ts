@@ -7,10 +7,22 @@ import type { SupportedChainId } from "./chains";
 // added later without changing every call site.
 export type Destination = { type: "arc"; address: Address };
 
-// Every settlement is cross-chain (an origin chain -> Arc), so there's a
-// single relayed shape. `chainId` is the ORIGIN the payer used.
+// `chainId` is the ORIGIN the payer used. Two shapes:
+//   - same-chain: payer was already on Arc, settled directly via Arcus.
+//     relayTxHash is the final Arc settlement tx.
+//   - cross-chain: payer was on Base/Arb/Polygon; relayTxHash is the
+//     origin-chain deposit, and the Arc-side delivery is tracked by
+//     bridgeDepositAddress via the status action.
 export type RelayResult =
   | { status: "no-balance"; address: Address }
+  | {
+      status: "relayed";
+      mode: "same-chain";
+      chainId: SupportedChainId;
+      address: Address;
+      amount: string;
+      relayTxHash: string;
+    }
   | {
       status: "relayed";
       mode: "cross-chain";

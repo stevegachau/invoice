@@ -8,9 +8,30 @@ import {
   parseUnits,
   keccak256,
   toBytes,
+  defineChain,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base, arbitrum, polygon } from "viem/chains";
+
+// x402 facilitators — the services that verify an EIP-3009 authorization and
+// submit the transfer on-chain, paying gas themselves. PayAI covers the EVM
+// origin chains; Arcus covers Arc (and is the only facilitator that does, so
+// it's what makes same-chain Arc->Arc settlement possible at all).
+const FACILITATOR_PAYAI = "https://facilitator.payai.network";
+const FACILITATOR_ARCUS = "https://facilitator.arcusnetwork.co";
+
+// Arc — Circle's USDC-native L1, chain id 5042 (mainnet live 2026-09-16).
+// Minimal viem chain: we only ever read balances / build a client for it,
+// never need block explorers or multicall here. USDC on Arc for x402/EIP-3009
+// is the ERC-20 representation at 0x3600…0000 (6 decimals) — the native gas
+// asset (0x0000…0000, 18 decimals) can't do transferWithAuthorization, so all
+// Arc-side movement uses the ERC-20 form.
+const arc = defineChain({
+  id: 5042,
+  name: "Arc",
+  nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+  rpcUrls: { default: { http: ["https://rpc.mainnet.arc.io"] } },
+});
 
 // =============================================================================
 // invoice-relay — a stateless serverless function that collects USDC on Base,
@@ -54,13 +75,22 @@ class HttpError extends Error {
 }
 
 // -----------------------------------------------------------------------
-// Origin chains — where payers send USDC from. Only these 3, confirmed
-// live against PayAI's own /supported endpoint (its facilitator pays the
-// gas for the relay). Ethereum mainnet and Optimism are genuinely NOT
-// covered — don't add them here without either a different gasless-relay
-// path, or accepting the payer covers their own gas. Arc is deliberately
-// absent: it's the settlement destination, never an origin.
+// Origin chains — where payers send USDC from, and the facilitator that
+// pays the origin-side relay gas for each. Base/Arbitrum/Polygon are
+// covered by PayAI (confirmed live against its /supported endpoint);
+// Ethereum mainnet and Optimism are NOT — don't add them without a working
+// gasless-relay path. Arc is ALSO an origin now (Arcus facilitates it), so
+// a payer already on Arc can settle same-chain with no bridge; see
+// ARC_CHAIN_ID below and handleRelay's same-chain branch.
 // -----------------------------------------------------------------------
+const ARC_CHAIN_ID = 5042;
+
+// USDC on Arc for x402/EIP-3009 is the ERC-20 representation (6 decimals),
+// not the native gas asset — see the `arc` chain note above. This is both
+// the same-chain origin token AND the cross-chain Relay settlement currency,
+// so a merchant receives the exact same asset however they were paid.
+const ARC_USDC = "0x3600000000000000000000000000000000000000";
+
 const SUPPORTED_CHAINS = {
   8453: {
     chain: base,
@@ -71,12 +101,14 @@ const SUPPORTED_CHAINS = {
       "https://base-rpc.publicnode.com",
     ],
     caip2: "eip155:8453",
+    facilitator: FACILITATOR_PAYAI,
   },
   42161: {
     chain: arbitrum,
     usdc: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     rpcUrls: ["https://arb1.arbitrum.io/rpc", "https://arbitrum.publicnode.com"],
     caip2: "eip155:42161",
+    facilitator: FACILITATOR_PAYAI,
   },
   137: {
     chain: polygon,
@@ -89,18 +121,16 @@ const SUPPORTED_CHAINS = {
       "https://1rpc.io/matic",
     ],
     caip2: "eip155:137",
+    facilitator: FACILITATOR_PAYAI,
+  },
+  5042: {
+    chain: arc,
+    usdc: ARC_USDC, // ERC-20 USDC, 6 decimals
+    rpcUrls: ["https://rpc.mainnet.arc.io"],
+    caip2: "eip155:5042",
+    facilitator: FACILITATOR_ARCUS,
   },
 };
-
-// Arc — Circle's USDC-native L1, the settlement destination. Chain id 5042
-// (mainnet went live 2026-09-16). USDC is Arc's NATIVE gas asset, so on
-// Relay it's addressed as the native currency: the zero address. (Relay
-// also exposes an ERC-20 USDC representation at 0x3600…0000, but the native
-// form is what a recipient actually holds and spends on Arc — it doubles as
-// gas — so that's what we settle into.) Confirmed live against Relay's own
-// /chains endpoint and a real Base->Arc deposit-address quote.
-const ARC_CHAIN_ID = 5042;
-const ARC_USDC = "0x0000000000000000000000000000000000000000";
 
 function requireChainConfig(chainId) {
   const cfg = SUPPORTED_CHAINS[Number(chainId)];
@@ -239,9 +269,10 @@ async function getRelayRequestStatus(depositAddress) {
 }
 
 // -----------------------------------------------------------------------
-// PayAI x402 facilitator — EIP-3009 authorization + verify/settle
+// x402 facilitator — EIP-3009 authorization + verify/settle. Works with any
+// x402-v2 facilitator (PayAI for the EVM origins, Arcus for Arc); the base
+// URL is passed in per call.
 // -----------------------------------------------------------------------
-const FACILITATOR_BASE = "https://facilitator.payai.network";
 
 const TRANSFER_WITH_AUTHORIZATION_TYPES = {
   TransferWithAuthorization: [
@@ -285,11 +316,12 @@ async function getEip712Domain(publicClient, tokenAddress) {
 }
 
 // Signs an EIP-3009 transferWithAuthorization moving `amount` from the
-// invoice's derived EOA to `to`, then relays it through PayAI's
+// invoice's derived EOA to `to`, then relays it through the given x402
 // facilitator, which verifies the signature and submits the on-chain
 // transaction itself, paying gas. The invoice address never needs native
 // gas.
 async function relayViaFacilitator({
+  facilitatorBase,
   publicClient,
   account,
   chainId,
@@ -357,10 +389,12 @@ async function relayViaFacilitator({
     extra: { name: domain.name, version: domain.version },
   };
 
-  const verifyRes = await fetch(`${FACILITATOR_BASE}/verify`, {
+  const verifyRes = await fetch(`${facilitatorBase}/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ paymentPayload, paymentRequirements }),
+    // Top-level x402Version matches Arcus's documented schema; PayAI ignores
+    // the extra field, so this body works for both facilitators.
+    body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements }),
   });
   const verifyJson = await verifyRes.json();
   if (!verifyRes.ok || verifyJson.isValid === false) {
@@ -369,10 +403,10 @@ async function relayViaFacilitator({
     );
   }
 
-  const settleRes = await fetch(`${FACILITATOR_BASE}/settle`, {
+  const settleRes = await fetch(`${facilitatorBase}/settle`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ paymentPayload, paymentRequirements }),
+    body: JSON.stringify({ x402Version: 2, paymentPayload, paymentRequirements }),
   });
   const settleJson = await settleRes.json();
   if (!settleRes.ok || settleJson.success === false) {
@@ -506,10 +540,17 @@ async function handleCreateInvoiceUrl(body) {
 }
 
 // action: "relay" — re-derives the same keypair, reads the LIVE balance on
-// the given origin chain, and if there's anything there, bridges the entire
-// balance to the merchant's Arc address via a Relay deposit-address quote.
-// Always cross-chain: the origin is one of Base/Arbitrum/Polygon and the
-// destination is always Arc, so there is no same-chain shortcut.
+// the given origin chain, and if there's anything there, delivers the entire
+// balance to the merchant's Arc address:
+//
+//   - origin is Arc (5042)        -> same-chain: EIP-3009 transfer straight
+//     to the merchant via Arcus. No bridge, no bridging fee.
+//   - origin is Base/Arb/Polygon  -> cross-chain: a Relay deposit-address
+//     quote (origin USDC -> Arc USDC) relayed via PayAI; Relay's solvers
+//     deliver on Arc.
+//
+// Both paths settle the same asset (Arc ERC-20 USDC), so the merchant
+// receives an identical balance regardless of how they were paid.
 //
 // Input:
 //   { invoiceId, chainId, destination: { type: "arc", address } }
@@ -533,7 +574,31 @@ async function handleRelay(body) {
     return { status: "no-balance", address: account.address };
   }
 
-  // Bridge origin-chain USDC -> Arc native USDC via Relay.
+  // Same-chain: payer is already on Arc, so hand the balance straight to the
+  // merchant via Arcus — no bridge involved.
+  if (Number(chainId) === ARC_CHAIN_ID) {
+    const { txHash } = await relayViaFacilitator({
+      facilitatorBase: cfg.facilitator,
+      publicClient,
+      account,
+      chainId: ARC_CHAIN_ID,
+      caip2: cfg.caip2,
+      tokenAddress: cfg.usdc,
+      to: destination.address,
+      amount: balance,
+    });
+
+    return {
+      status: "relayed",
+      mode: "same-chain",
+      chainId: ARC_CHAIN_ID,
+      address: account.address,
+      amount: balance.toString(),
+      relayTxHash: txHash,
+    };
+  }
+
+  // Cross-chain: bridge origin-chain USDC -> Arc USDC via Relay.
   const { chainId: destChainId, currency: destCurrency } =
     resolveDestinationChainAndCurrency();
 
@@ -555,6 +620,7 @@ async function handleRelay(body) {
   }
 
   const { txHash } = await relayViaFacilitator({
+    facilitatorBase: cfg.facilitator,
     publicClient,
     account,
     chainId: Number(chainId),
@@ -620,6 +686,20 @@ async function handlePreviewQuote(body) {
   validateDestination(destination);
 
   const cfg = requireChainConfig(originChainId);
+
+  // Arc origin -> Arc is same-chain: no bridge, no fee, so the full amount
+  // lands 1:1. (The form previews a cross-chain origin, so this is just a
+  // safety net for a direct Arc-origin preview.)
+  if (Number(originChainId) === ARC_CHAIN_ID) {
+    const formatted = (Number(amount) / 1e6).toString();
+    return {
+      amountIn: String(amount),
+      amountOut: String(amount),
+      amountOutFormatted: formatted,
+      timeEstimate: 1,
+    };
+  }
+
   const { chainId: destChainId, currency: destCurrency } =
     resolveDestinationChainAndCurrency();
 

@@ -1,18 +1,18 @@
 import { base, arbitrum, polygon } from "viem/chains";
-import { ARC } from "../chains";
-import type { SupportedChainId } from "../chains";
+import { arc, type SupportedChainId } from "../chains";
 
 // Origin chains use cool tones; Arc — the settlement chain — is warm amber,
-// so a payment visibly converges from any cool origin into the one warm
-// Arc destination. Amber doubles as the app's "value / settled" accent.
-export const ARC_ID = "arc" as const;
-export type NetworkId = SupportedChainId | typeof ARC_ID;
+// so a payment visibly converges from any cool origin into the one warm Arc
+// destination. Amber doubles as the app's "value / settled" accent. (Arc is
+// also a valid origin now, and still reads amber there, which is fine — it's
+// the same network.)
+export type NetworkId = SupportedChainId;
 
-const THEME: Record<NetworkId, { dot: string; label: string }> = {
+const THEME: Record<SupportedChainId, { dot: string; label: string }> = {
   [base.id]: { dot: "#5b8cff", label: "Base" },
   [arbitrum.id]: { dot: "#57b7f5", label: "Arbitrum" },
   [polygon.id]: { dot: "#b18aff", label: "Polygon" },
-  [ARC_ID]: { dot: "#ffb020", label: ARC.label },
+  [arc.id]: { dot: "#ffb020", label: "Arc" },
 };
 
 export function networkLabel(id: NetworkId): string {
@@ -38,7 +38,7 @@ export function NetworkBadge({
   active?: boolean;
 }) {
   const t = THEME[id];
-  const isArc = id === ARC_ID;
+  const isArc = id === arc.id;
   const dim =
     size === "sm"
       ? "h-7 px-2.5 text-[10px] gap-1.5"

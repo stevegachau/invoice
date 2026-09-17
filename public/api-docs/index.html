@@ -147,12 +147,12 @@
     <p class="desc"><strong style="color:var(--ink)">destination</strong> — the merchant's payout address on Arc (chain id 5042). Arc is EVM-compatible, so this is a standard 0x address:</p>
     <pre>{ <span class="k">"type"</span>: <span class="s">"arc"</span>, <span class="k">"address"</span>: <span class="s">"0x..."</span> }</pre>
 
-    <p class="desc">Payers send USDC from any of these origin networks — the only chains covered by gasless relaying today. Settlement is always Arc.</p>
+    <p class="desc">Payers send USDC from any of these origin networks — all gasless. Settlement is always Arc; paying from Arc settles same-chain with no bridge.</p>
     <ul class="chains">
       <li>8453 · Base</li>
       <li>42161 · Arbitrum</li>
       <li>137 · Polygon</li>
-      <li>5042 · Arc <span style="color:var(--amber)">· settlement</span></li>
+      <li>5042 · Arc <span style="color:var(--amber)">· origin + settlement</span></li>
     </ul>
 
     <p class="desc"><strong style="color:var(--ink)">Request</strong></p>

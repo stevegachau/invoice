@@ -16,7 +16,7 @@ import {
   Loader2,
   ShieldCheck,
 } from "lucide-react";
-import { CHAINS, CHAIN_LABEL, USDC, arcTxUrl, arcAddressUrl, type SupportedChainId } from "../chains";
+import { CHAINS, CHAIN_LABEL, USDC, arcTxUrl, arcAddressUrl, SETTLEMENT_CHAIN_ID, type SupportedChainId } from "../chains";
 import type { IssuedInvoice } from "../invoice";
 import type { RelayResult } from "../relayApi";
 import { ChainDot, NetworkBadge, networkLabel, type NetworkId } from "./NetworkBadge";
@@ -255,7 +255,7 @@ function InvoiceDocument({
               Settles on
             </div>
             <div className="mt-2 inline-flex">
-              <NetworkBadge id="arc" size="lg" active />
+              <NetworkBadge id={SETTLEMENT_CHAIN_ID} size="lg" active />
             </div>
           </div>
         )}
@@ -279,7 +279,7 @@ function InvoiceDocument({
               <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
                 Settled on
               </div>
-              <NetworkBadge id="arc" size="lg" active />
+              <NetworkBadge id={SETTLEMENT_CHAIN_ID} size="lg" active />
             </div>
           </div>
         </div>
@@ -309,7 +309,7 @@ function InvoiceDocument({
                   Send USDC to this address
                 </div>
                 <div className="mt-1 text-sm text-ink-dim">
-                  Pay from any origin network below — funds are bridged to the
+                  Pay from any origin network below — funds settle to the
                   merchant's Arc account the moment they arrive.
                 </div>
               </div>
@@ -404,14 +404,19 @@ function PaidCard({
 }) {
   if (!relay || relay.status !== "relayed") return null;
 
-  // The final delivery tx is on Arc, reported by Relay's status endpoint
-  // (distinct from the origin-chain deposit hash in relay.relayTxHash).
-  const finalTxHash = destinationTxHash;
+  const isSameChain = relay.mode === "same-chain";
 
-  // Prefer Relay's confirmed net amount on Arc (after bridging fee); fall
-  // back to the swept origin amount if the status hasn't loaded yet.
-  const landedAmountFormatted =
-    destinationAmountFormatted ?? formatUnits(BigInt(relay.amount), 6);
+  // Same-chain: relayTxHash IS the final Arc settlement tx. Cross-chain: the
+  // final delivery tx on Arc comes from Relay's status endpoint (distinct
+  // from the origin-chain deposit hash in relay.relayTxHash).
+  const finalTxHash = isSameChain ? relay.relayTxHash : destinationTxHash;
+
+  // Same-chain lands the full amount (no bridge fee). Cross-chain: prefer
+  // Relay's confirmed net amount on Arc; fall back to the swept amount if
+  // the status hasn't loaded yet.
+  const landedAmountFormatted = isSameChain
+    ? formatUnits(BigInt(relay.amount), 6)
+    : (destinationAmountFormatted ?? formatUnits(BigInt(relay.amount), 6));
 
   const finalLink = finalTxHash ? arcTxUrl(finalTxHash) : undefined;
 
@@ -471,38 +476,53 @@ function SettlementProgress({
     boardStatus === "SETTLED" ? "green" : boardStatus === "AWAITING" ? "ink" : "amber";
 
   const relayed = settlement.relay?.status === "relayed" ? settlement.relay : undefined;
+  const isSameChain = relayed?.mode === "same-chain";
 
-  const steps = [
-    {
-      done: !!settlement.source,
-      title: settlement.source ? `Funds received on ${sourceLabel}` : "Waiting for funds",
-      detail: settlement.source
-        ? formatAmount(settlement.source.amount)
-        : "Send USDC to any origin network",
-      chainId: settlement.source?.chainId,
-      txHash: settlement.source?.txHash,
-    },
-    {
-      done: !!relayed,
-      title: "Bridging to Arc",
-      detail: relayed
-        ? "Relay deposit submitted"
-        : settlement.source
-          ? "Triggering…"
-          : "Pending",
-      chainId: settlement.source?.chainId,
-      txHash: relayed?.relayTxHash,
-    },
-    {
-      done: settlement.complete,
-      title: "Settled on Arc",
-      detail: settlement.complete
-        ? "Confirmed"
-        : relayed
-          ? (settlement.bridgeStatus ?? "Awaiting fill…")
-          : "Pending",
-    },
-  ];
+  const receivedStep = {
+    done: !!settlement.source,
+    title: settlement.source ? `Funds received on ${sourceLabel}` : "Waiting for funds",
+    detail: settlement.source
+      ? formatAmount(settlement.source.amount)
+      : "Send USDC to any origin network",
+    chainId: settlement.source?.chainId,
+    txHash: settlement.source?.txHash,
+  };
+
+  // Same-chain (Arc->Arc via Arcus) skips bridging — a single settle step.
+  const steps = isSameChain
+    ? [
+        receivedStep,
+        {
+          done: settlement.complete,
+          title: "Settled on Arc",
+          detail: settlement.complete ? "Direct via Arcus" : "Settling…",
+          chainId: settlement.source?.chainId,
+          txHash: relayed?.relayTxHash,
+        },
+      ]
+    : [
+        receivedStep,
+        {
+          done: !!relayed,
+          title: "Bridging to Arc",
+          detail: relayed
+            ? "Relay deposit submitted"
+            : settlement.source
+              ? "Triggering…"
+              : "Pending",
+          chainId: settlement.source?.chainId,
+          txHash: relayed?.relayTxHash,
+        },
+        {
+          done: settlement.complete,
+          title: "Settled on Arc",
+          detail: settlement.complete
+            ? "Confirmed"
+            : relayed
+              ? (settlement.bridgeStatus ?? "Awaiting fill…")
+              : "Pending",
+        },
+      ];
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-6">

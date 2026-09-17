@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPublicClient, erc20Abi, fallback, http, type Address, type Hex } from "viem";
-import { CHAINS, RPC_URLS, USDC, BLOCK_TIME_MS, type SupportedChainId } from "./chains";
+import { CHAINS, RPC_URLS, USDC, BLOCK_TIME_MS, SETTLEMENT_CHAIN_ID, type SupportedChainId } from "./chains";
 import { triggerRelay, type Destination, type RelayResult } from "./relayApi";
 import { fetchBridgeStatus, type BridgeStatus } from "./bridgeStatus";
 
@@ -77,9 +77,10 @@ export function useInvoiceSettlement(
     return {
       relay: cachedRelay,
       source: { chainId: cachedRelay.chainId, amount: BigInt(cachedRelay.amount) },
-      // A cached cross-chain relay isn't complete until Relay confirms the
-      // Arc-side fill — the bridge-status effect below picks that up.
-      complete: false,
+      // Same-chain (Arc->Arc via Arcus) is done the moment it's relayed. A
+      // cross-chain relay isn't complete until Relay confirms the Arc-side
+      // fill — the bridge-status effect below picks that up.
+      complete: cachedRelay.mode === "same-chain",
     };
   });
   const relayAttempts = useRef<Map<SupportedChainId, number>>(new Map());
@@ -178,19 +179,40 @@ export function useInvoiceSettlement(
           }
 
           if (outflows.length > 0) {
-            // An outbound transfer means the balance was already relayed —
-            // to the Relay deposit address on this origin chain, which
-            // bridges it to Arc. Recovered directly from chain history, so
-            // settlement state is re-derivable even with zero cached state.
+            // An outbound transfer means the balance was already relayed.
+            // Recovered directly from chain history, so settlement state is
+            // re-derivable even with zero cached state.
+            //   - origin is Arc + `to` is the merchant  -> same-chain
+            //     settle (via Arcus). Complete: this IS the final tx.
+            //   - otherwise -> cross-chain: `to` is the Relay deposit
+            //     address that bridges to Arc.
             const first = outflows[0];
             const outAmount = first.args.value ?? 0n;
             const toAddr = first.args.to as Address;
+            const isSameChainDirect =
+              Number(chainId) === SETTLEMENT_CHAIN_ID &&
+              toAddr.toLowerCase() === destination.address.toLowerCase();
 
             setState((prev) => {
               if (prev.relay) return prev;
               const withSource = prev.source
                 ? prev
                 : { ...prev, source: { chainId, amount: outAmount } };
+
+              if (isSameChainDirect) {
+                return {
+                  ...withSource,
+                  relay: {
+                    status: "relayed",
+                    mode: "same-chain",
+                    chainId,
+                    address: invoiceAddress,
+                    amount: outAmount.toString(),
+                    relayTxHash: first.transactionHash ?? "",
+                  },
+                  complete: true,
+                };
+              }
 
               return {
                 ...withSource,
@@ -266,11 +288,12 @@ export function useInvoiceSettlement(
     relayInFlight.current.delete(chainId);
   }
 
-  // Every relay is cross-chain (origin -> Arc), so poll Relay's status by
-  // deposit address until it reports the Arc-side fill as "success".
+  // Cross-chain relays need Relay's status polled by deposit address until
+  // it reports the Arc-side fill as "success". Same-chain (Arc->Arc) is
+  // already complete when detected, so there's nothing to poll.
   useEffect(() => {
     if (!state.relay || state.relay.status !== "relayed") return;
-    if (state.complete) return;
+    if (state.relay.mode === "same-chain" || state.complete) return;
 
     let cancelled = false;
     const depositAddress = state.relay.bridgeDepositAddress;

@@ -10,7 +10,7 @@ import {
   Loader2,
   User,
 } from "lucide-react";
-import { CHAINS } from "../chains";
+import { CHAINS, SETTLEMENT_CHAIN_ID } from "../chains";
 import { issueInvoice, type IssuedInvoice } from "../invoice";
 import { previewQuote, type Destination, type PreviewQuote } from "../relayApi";
 import { ChainDot, networkLabel } from "./NetworkBadge";
@@ -120,7 +120,8 @@ export function InvoiceForm({
         </h2>
         <p className="mt-1 text-sm text-ink-dim">
           Billed in USDC, settled on Arc. Your customer pays from Base,
-          Arbitrum, or Polygon — it lands in your Arc account automatically.
+          Arbitrum, Polygon, or Arc — it lands in your Arc account
+          automatically.
         </p>
       </header>
 
@@ -212,8 +213,8 @@ export function InvoiceForm({
           </p>
         ) : (
           <p className="mt-1.5 text-[11px] text-ink-faint leading-relaxed">
-            USDC is Arc's native asset — funds arrive spendable, gas included.
-            Arc is EVM-compatible, so this is a standard 0x address.
+            Funds settle here as USDC on Arc. Arc is EVM-compatible, so this
+            is a standard 0x address.
           </p>
         )}
       </section>
@@ -243,7 +244,7 @@ export function InvoiceForm({
           <SummaryRow
             label="Settles on"
             value="Arc"
-            tag={<ChainDot id="arc" />}
+            tag={<ChainDot id={SETTLEMENT_CHAIN_ID} />}
             accent="amber"
           />
           <SummaryRow
