@@ -120,7 +120,7 @@
   <header class="page">
     <a class="back" href="/">← Invoices</a>
     <h1>Invoices API</h1>
-    <p>Generate cross-chain USDC invoice links programmatically. One endpoint, action-based, no API key.</p>
+    <p>Generate USDC invoice links that settle on Arc. Customers pay from Base, Arbitrum, or Polygon; funds settle as native USDC on Arc. One endpoint, action-based, no API key.</p>
     <div class="base-url">
       <span class="label">Endpoint</span>
       <code>POST https://www.invoices.wtf/api/relay</code>
@@ -144,19 +144,15 @@
       <tr><td class="name">destination</td><td>object</td><td class="req">required</td><td>see below</td></tr>
     </table>
 
-    <p class="desc"><strong style="color:var(--ink)">destination</strong> — one of:</p>
-    <pre><span class="c">// EVM — Base, Arbitrum, or Polygon</span>
-{ <span class="k">"type"</span>: <span class="s">"evm"</span>, <span class="k">"chainId"</span>: <span class="n">8453</span>, <span class="k">"address"</span>: <span class="s">"0x..."</span> }
+    <p class="desc"><strong style="color:var(--ink)">destination</strong> — the merchant's payout address on Arc (chain id 5042). Arc is EVM-compatible, so this is a standard 0x address:</p>
+    <pre>{ <span class="k">"type"</span>: <span class="s">"arc"</span>, <span class="k">"address"</span>: <span class="s">"0x..."</span> }</pre>
 
-<span class="c">// Solana — destination only, no chainId (Solana isn't EVM,</span>
-<span class="c">// so there's no equivalent small integer chain id to use)</span>
-{ <span class="k">"type"</span>: <span class="s">"solana"</span>, <span class="k">"address"</span>: <span class="s">"..."</span> }</pre>
-
-    <p class="desc">Supported EVM <code>chainId</code> values — the only chains covered by gasless relaying today:</p>
+    <p class="desc">Payers send USDC from any of these origin networks — the only chains covered by gasless relaying today. Settlement is always Arc.</p>
     <ul class="chains">
       <li>8453 · Base</li>
       <li>42161 · Arbitrum</li>
       <li>137 · Polygon</li>
+      <li>5042 · Arc <span style="color:var(--amber)">· settlement</span></li>
     </ul>
 
     <p class="desc"><strong style="color:var(--ink)">Request</strong></p>
@@ -164,10 +160,10 @@
   -H <span class="s">"Content-Type: application/json"</span> \
   -d <span class="s">'{
     "action": "createInvoiceUrl",
-    "companyName": "Loud Socks Studio",
-    "description": "Podcast intro pack",
+    "companyName": "Acme Capital",
+    "description": "Advisory retainer",
     "amount": "25",
-    "destination": { "type": "evm", "chainId": 8453, "address": "0x1Cc1BD36202546E57B5337a8ba9BcC3Df815D3Cc" }
+    "destination": { "type": "arc", "address": "0x1Cc1BD36202546E57B5337a8ba9BcC3Df815D3Cc" }
   }'</span></pre>
 
     <p class="desc"><strong style="color:var(--ink)">Response</strong></p>

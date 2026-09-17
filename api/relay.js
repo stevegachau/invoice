@@ -13,50 +13,37 @@ import { privateKeyToAccount } from "viem/accounts";
 import { base, arbitrum, polygon } from "viem/chains";
 
 // =============================================================================
-// invoice-relay — a stateless serverless function replacing Biconomy MEE +
-// Across for the "collect USDC, deliver anywhere (including Solana and Robinhood
-// Chain/USDG)" leg of the invoicing app.
+// invoice-relay — a stateless serverless function that collects USDC on Base,
+// Arbitrum, or Polygon and settles it on Arc, Circle's USDC-native L1.
 //
-// This is the Vercel port of what used to be a Google Cloud Function
-// (`invoice-relay-fn`). The logic is byte-for-byte the same — only the HTTP
-// entrypoint at the bottom changed (functions-framework `http()` -> a Vercel
-// `export default (req, res)` handler). Everything now lives in one repo/deploy
-// alongside the frontend, so there's no separate backend URL or CORS story:
-// the app calls this at the same origin as `/api/relay`.
+// Arc is the settlement chain: every invoice is paid out in USDC on Arc, where
+// USDC is the native gas asset ("gas in dollars"). The payer sends USDC on
+// whichever origin chain they hold it on (Base / Arbitrum / Polygon); this
+// function bridges the whole balance to the merchant's Arc address via Relay
+// (relay.link). There is no same-chain path: Arc is destination-only here,
+// since it can't be an origin (no x402 facilitator covers Arc yet), and the
+// three origin chains are never themselves a settlement target.
 //
-// The idea: each invoice gets a plain EOA address, deterministically derived
-// from HMAC(masterSecret, invoiceId) — same address on every EVM chain for
-// free, since it's a real keypair, not a smart-contract account needing
-// counterfactual deployment. The frontend polls that address client-side.
-// When a balance shows up, it calls this function, which:
-//   1. Re-derives the same keypair (pure function of invoiceId + secret —
-//      no lookup, no database).
-//   2. Reads the LIVE on-chain USDC balance itself (never trusts a
-//      client-supplied amount).
-//   3. Delivers the entire balance to `destination`, via one of two paths:
-//        - same chain as the payer used  -> direct EIP-3009 relay, no
-//          bridging at all.
-//        - anywhere else (a different EVM chain, Solana, or Robinhood
-//          Chain/USDG) -> a Relay (relay.link) deposit-address quote,
-//          relayed to the deposit address it returns on the ORIGIN chain;
-//          Relay's solver network delivers the rest. All three
-//          destination kinds go through this exact same code path below
-//          — the only difference is which destinationChainId/Currency
-//          gets passed in. Solana/Robinhood can only ever be a
-//          destination here, never an origin, since this whole approach
-//          is EOA/EIP-3009-based and neither is EVM-with-PayAI-coverage.
-//   4. Either way, relaying goes through PayAI's free x402 facilitator,
-//      which submits the on-chain tx and pays gas itself. The invoice
-//      address never holds native gas.
+// The mechanism:
+//   1. Each invoice gets a plain EOA address, deterministically derived from
+//      HMAC(masterSecret, invoiceId) — the same address on every origin chain
+//      for free, since it's a real keypair, not a smart-contract account. The
+//      frontend polls that address client-side across the 3 origin chains.
+//   2. When a balance shows up, this function re-derives the same keypair
+//      (pure function of invoiceId + secret — no lookup, no database) and reads
+//      the LIVE on-chain USDC balance itself (never trusts a client amount).
+//   3. It requests a Relay deposit-address quote (origin chain USDC -> Arc
+//      native USDC) and relays the entire balance to the deposit address Relay
+//      returns on the ORIGIN chain. Relay's solver network delivers USDC to the
+//      merchant on Arc.
+//   4. The origin-chain relay goes through PayAI's free x402 facilitator, which
+//      submits the on-chain tx and pays gas itself, so the invoice address
+//      never needs native gas.
 //
-// Why no database: sweeping the ENTIRE live balance (not a fixed amount)
-// makes this safely stateless. Resumability is handled by the frontend
-// writing the relay result back into the invoice's URL hash, same pattern
-// the app already uses. Idempotency: a second concurrent call re-reads the
-// balance; if it's already zero, it's a no-op. If two calls race before
-// either settles, both might submit, but ERC20 balances can't go negative,
-// so the second one just reverts — harmless, and PayAI eats the gas either
-// way, not us.
+// Why no database: sweeping the ENTIRE live balance (not a fixed amount) makes
+// this safely stateless. Resumability is handled by the frontend writing the
+// relay result back into the invoice's URL hash. Idempotency: a second
+// concurrent call re-reads the balance; if it's already zero, it's a no-op.
 // =============================================================================
 
 class HttpError extends Error {
@@ -67,11 +54,12 @@ class HttpError extends Error {
 }
 
 // -----------------------------------------------------------------------
-// Chain config — only these 3. Confirmed live against PayAI's own
-// /supported endpoint. Ethereum mainnet and Optimism are genuinely NOT
-// covered by their facilitator — don't add them here without either a
-// different gasless-relay path for those chains, or accepting the payer
-// covers their own gas.
+// Origin chains — where payers send USDC from. Only these 3, confirmed
+// live against PayAI's own /supported endpoint (its facilitator pays the
+// gas for the relay). Ethereum mainnet and Optimism are genuinely NOT
+// covered — don't add them here without either a different gasless-relay
+// path, or accepting the payer covers their own gas. Arc is deliberately
+// absent: it's the settlement destination, never an origin.
 // -----------------------------------------------------------------------
 const SUPPORTED_CHAINS = {
   8453: {
@@ -104,23 +92,15 @@ const SUPPORTED_CHAINS = {
   },
 };
 
-// USDC on Solana (mainnet) — confirmed against multiple live quotes (both
-// 1Click and Relay) and real settled transfers earlier in this project.
-// Relay identifies Solana with this pseudo chain ID (not a real Solana
-// concept — analogous to how 1Click used 34268394551451 for the same
-// purpose) — confirmed live against a real Relay quote.
-const SOLANA_CHAIN_ID = 792703809;
-const SOLANA_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-
-// Robinhood Chain — destination-only, same reasoning as Solana: no
-// same-chain relay path (PayAI doesn't support this chain, confirmed
-// against their live /supported endpoint — it launched July 1, 2026, only
-// ~2 weeks ago). USDG does implement EIP-3009 (confirmed from Paxos's own
-// usdg-contract repo), so the token itself isn't the blocker — the
-// facilitator coverage is. destination-only means every delivery here goes
-// through Relay, never a direct same-chain transfer.
-const ROBINHOOD_CHAIN_ID = 4663;
-const ROBINHOOD_USDG = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"; // confirmed via Blockscout + a real Relay quote
+// Arc — Circle's USDC-native L1, the settlement destination. Chain id 5042
+// (mainnet went live 2026-09-16). USDC is Arc's NATIVE gas asset, so on
+// Relay it's addressed as the native currency: the zero address. (Relay
+// also exposes an ERC-20 USDC representation at 0x3600…0000, but the native
+// form is what a recipient actually holds and spends on Arc — it doubles as
+// gas — so that's what we settle into.) Confirmed live against Relay's own
+// /chains endpoint and a real Base->Arc deposit-address quote.
+const ARC_CHAIN_ID = 5042;
+const ARC_USDC = "0x0000000000000000000000000000000000000000";
 
 function requireChainConfig(chainId) {
   const cfg = SUPPORTED_CHAINS[Number(chainId)];
@@ -186,20 +166,12 @@ function relayAuthHeaders() {
   return process.env.RELAY_API_KEY ? { "x-api-key": process.env.RELAY_API_KEY } : {};
 }
 
-// Relay addresses tokens with plain chainId + raw contract address — no
-// NEAR-intents-style wrapped asset-ID scheme to resolve, unlike 1Click.
-// This is why there's no token-list-lookup/caching module here anymore:
-// everything needed is already in SUPPORTED_CHAINS or the Solana/Robinhood
-// constants above.
-function resolveDestinationChainAndCurrency(destination) {
-  if (destination.type === "solana") {
-    return { chainId: SOLANA_CHAIN_ID, currency: SOLANA_USDC_MINT };
-  }
-  if (destination.type === "robinhood") {
-    return { chainId: ROBINHOOD_CHAIN_ID, currency: ROBINHOOD_USDG };
-  }
-  const destCfg = requireChainConfig(destination.chainId);
-  return { chainId: destination.chainId, currency: destCfg.usdc };
+// The settlement destination is always Arc — a single {chainId, currency}
+// pair. Kept as a function (rather than inlined) so the one place that
+// decides "where does USDC land" stays obvious, and so a second settlement
+// chain could be added later without hunting through the relay/quote code.
+function resolveDestinationChainAndCurrency() {
+  return { chainId: ARC_CHAIN_ID, currency: ARC_USDC };
 }
 
 // The response's steps[0].depositAddress is on the ORIGIN chain — that's
@@ -416,53 +388,25 @@ async function relayViaFacilitator({
 // Destination validation
 // -----------------------------------------------------------------------
 
-// Length/charset sanity check only — doesn't guarantee validity the way a
-// full base58 decode + exact-32-bytes check would, but catches obvious
-// typos early rather than failing deep inside a Relay call with a less
-// clear error.
-function isLikelyBase58SolanaAddress(s) {
-  return typeof s === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
-}
-
+// The only settlement destination is Arc, which is EVM-compatible, so the
+// payout address is a plain 0x address. (No requireChainConfig lookup —
+// Arc isn't one of the origin chains this function reads balances on.)
 function validateDestination(destination) {
   if (!destination || typeof destination !== "object") {
     throw new HttpError(400, "destination is required");
   }
-  if (destination.type === "evm") {
-    requireChainConfig(destination.chainId); // throws a clear 400 if unsupported
-    if (!isAddress(destination.address)) {
-      throw new HttpError(
-        400,
-        `destination.address "${destination.address}" is not a valid EVM address`,
-      );
-    }
-    return;
+  if (destination.type !== "arc") {
+    throw new HttpError(
+      400,
+      `destination.type must be "arc", got "${destination?.type}"`,
+    );
   }
-  if (destination.type === "solana") {
-    if (!isLikelyBase58SolanaAddress(destination.address)) {
-      throw new HttpError(
-        400,
-        `destination.address "${destination.address}" doesn't look like a valid Solana address`,
-      );
-    }
-    return;
+  if (!isAddress(destination.address)) {
+    throw new HttpError(
+      400,
+      `destination.address "${destination.address}" is not a valid Arc (EVM) address`,
+    );
   }
-  if (destination.type === "robinhood") {
-    // Robinhood Chain is EVM-compatible — plain 0x address, same check as
-    // the "evm" case, just no requireChainConfig lookup since it isn't one
-    // of the 3 origin chains.
-    if (!isAddress(destination.address)) {
-      throw new HttpError(
-        400,
-        `destination.address "${destination.address}" is not a valid EVM address`,
-      );
-    }
-    return;
-  }
-  throw new HttpError(
-    400,
-    `destination.type must be "evm", "solana", or "robinhood", got "${destination?.type}"`,
-  );
 }
 
 // -----------------------------------------------------------------------
@@ -498,7 +442,9 @@ function toBase64Url(jsonString) {
 }
 
 const PUBLIC_APP_URL = process.env.PUBLIC_APP_URL || "https://www.invoices.wtf";
-const SHARE_HASH_VERSION = 6; // must match share.ts's VERSION — bump both together
+const SHARE_HASH_VERSION = 7; // must match share.ts's VERSION — bump both
+// together. v7 dropped multi-destination (Solana/Robinhood/any-EVM) for a
+// single Arc settlement target, so v6 links no longer decode.
 
 // action: "createInvoiceUrl" — the programmatic equivalent of filling out
 // the invoice form. Generates a random invoiceId exactly like the frontend
@@ -560,19 +506,13 @@ async function handleCreateInvoiceUrl(body) {
 }
 
 // action: "relay" — re-derives the same keypair, reads the LIVE balance on
-// the given origin chain, and if there's anything there, delivers the
-// entire balance to `destination`:
-//
-//   - destination.type === "evm" && destination.chainId === chainId
-//       -> same-chain direct relay. No bridge involved at all.
-//   - anything else (a different EVM chainId, "solana", or "robinhood")
-//     -> cross-chain via Relay. All three cases run through the exact
-//     same code below — the only difference is which
-//     destinationChainId/currency gets resolved.
+// the given origin chain, and if there's anything there, bridges the entire
+// balance to the merchant's Arc address via a Relay deposit-address quote.
+// Always cross-chain: the origin is one of Base/Arbitrum/Polygon and the
+// destination is always Arc, so there is no same-chain shortcut.
 //
 // Input:
-//   { invoiceId, chainId,
-//     destination: { type: "evm", chainId, address } | { type: "solana", address } | { type: "robinhood", address } }
+//   { invoiceId, chainId, destination: { type: "arc", address } }
 async function handleRelay(body) {
   const { invoiceId, chainId, destination } = body;
   if (!invoiceId) throw new HttpError(400, "invoiceId is required");
@@ -593,34 +533,9 @@ async function handleRelay(body) {
     return { status: "no-balance", address: account.address };
   }
 
-  const isSameChain =
-    destination.type === "evm" && Number(destination.chainId) === Number(chainId);
-
-  if (isSameChain) {
-    const { txHash } = await relayViaFacilitator({
-      publicClient,
-      account,
-      chainId: Number(chainId),
-      caip2: cfg.caip2,
-      tokenAddress: cfg.usdc,
-      to: destination.address,
-      amount: balance,
-    });
-
-    return {
-      status: "relayed",
-      mode: "same-chain",
-      chainId: Number(chainId),
-      address: account.address,
-      amount: balance.toString(),
-      relayTxHash: txHash,
-    };
-  }
-
-  // Cross-chain — a different EVM chain, Solana, or Robinhood Chain. Same
-  // Relay call either way; only destinationChainId/currency differs.
+  // Bridge origin-chain USDC -> Arc native USDC via Relay.
   const { chainId: destChainId, currency: destCurrency } =
-    resolveDestinationChainAndCurrency(destination);
+    resolveDestinationChainAndCurrency();
 
   const quote = await getRelayQuote({
     userAddress: account.address,
@@ -692,14 +607,11 @@ async function handleStatus(body) {
 }
 
 // action: "previewQuote" — a quote used by the invoice form to show an
-// estimated fee/fill amount before the invoice is even issued.
-// useDepositAddress is omitted (defaults to false) — no real deposit
-// address is reserved for a preview. The payer's actual origin chain
-// isn't known yet at invoice-creation time — only the destination is —
-// so the frontend picks a representative origin (any chain other than
-// the destination) to illustrate the cross-chain fee. Same-chain
-// payments are always free (sponsored, no bridging at all); the frontend
-// doesn't call this for that case.
+// estimated Arc settlement amount (after Relay's bridging fee) before the
+// invoice is even issued. useDepositAddress is omitted (defaults to false)
+// — no real deposit address is reserved for a preview. The payer's actual
+// origin chain isn't known yet at invoice-creation time, so the frontend
+// picks a representative origin to illustrate the fee.
 // Input: { originChainId, destination, amount }
 async function handlePreviewQuote(body) {
   const { originChainId, destination, amount } = body;
@@ -709,7 +621,7 @@ async function handlePreviewQuote(body) {
 
   const cfg = requireChainConfig(originChainId);
   const { chainId: destChainId, currency: destCurrency } =
-    resolveDestinationChainAndCurrency(destination);
+    resolveDestinationChainAndCurrency();
 
   const quote = await getRelayQuote({
     userAddress: "0x0000000000000000000000000000000000000000", // dry preview — never actually used

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { formatUnits } from "viem";
 import {
   ArrowLeft,
+  ArrowRight,
   ArrowUpRight,
   Building2,
   Check,
@@ -13,16 +14,12 @@ import {
   ExternalLink,
   Link2,
   Loader2,
-  Plane,
-  PlaneLanding,
   ShieldCheck,
-  Timer,
 } from "lucide-react";
-import { CHAINS, CHAIN_LABEL, USDC, type SupportedChainId } from "../chains";
+import { CHAINS, CHAIN_LABEL, USDC, arcTxUrl, arcAddressUrl, type SupportedChainId } from "../chains";
 import type { IssuedInvoice } from "../invoice";
-import type { Destination, RelayResult } from "../relayApi";
-import { GateDot, GateBadge, gateLetter, SOLANA_GATE_ID, ROBINHOOD_GATE_ID, type GateId } from "./GateBadge";
-import { SplitFlap } from "./SplitFlap";
+import type { RelayResult } from "../relayApi";
+import { ChainDot, NetworkBadge, networkLabel, type NetworkId } from "./NetworkBadge";
 import { buildShareUrl, encodeInvoiceHash } from "../share";
 import { useInvoiceSettlement } from "../useInvoiceSettlement";
 import { useIsCoarsePointer } from "../useIsMobileWallet";
@@ -41,12 +38,6 @@ export function InvoicePay({
 
   const amountStr = formatUnits(issued.invoice.amount, 6);
   const destination = issued.invoice.destination;
-  const destGateId: GateId =
-    destination.type === "solana"
-      ? SOLANA_GATE_ID
-      : destination.type === "robinhood"
-        ? ROBINHOOD_GATE_ID
-        : destination.chainId;
 
   const settlement = useInvoiceSettlement(
     issued.invoiceId,
@@ -59,9 +50,9 @@ export function InvoicePay({
   const relay = settlement.relay ?? cachedRelay;
 
   // Persist the relay result into the URL hash so reopening the link
-  // reflects it — and re-persist once `complete` flips true, so a fully
-  // settled invoice shows "Landed" instantly on reopen instead of forcing
-  // a fresh bridge-status poll every single time.
+  // reflects it — and re-persist once `complete` flips true, so a settled
+  // invoice shows "Settled" instantly on reopen instead of forcing a fresh
+  // bridge-status poll every time.
   useEffect(() => {
     if (settlement.relay && settlement.relay.status === "relayed") {
       window.location.hash = "#" + encodeInvoiceHash(issued, settlement.relay);
@@ -82,7 +73,7 @@ export function InvoicePay({
   }
 
   const status: "paid" | "awaiting" = complete ? "paid" : "awaiting";
-  const originGateId: GateId | undefined = complete
+  const originId: SupportedChainId | undefined = complete
     ? settlement.source?.chainId
     : undefined;
 
@@ -123,8 +114,7 @@ export function InvoicePay({
         <InvoiceDocument
           issued={issued}
           amountStr={amountStr}
-          destGateId={destGateId}
-          originGateId={originGateId}
+          originId={originId}
           status={status}
           copiedAddr={copiedAddr}
           onCopyAddr={handleCopyAddr}
@@ -134,14 +124,14 @@ export function InvoicePay({
           {complete ? (
             <PaidCard
               relay={relay}
-              destination={destination}
+              payoutAddress={destination.address}
               destinationTxHash={settlement.destinationTxHash}
               destinationAmountFormatted={settlement.destinationAmountFormatted}
             />
           ) : (
             <StatusNote unconfirmed={settlement.unconfirmed} />
           )}
-          <SettlementProgress settlement={settlement} destGateId={destGateId} />
+          <SettlementProgress settlement={settlement} />
         </aside>
       </div>
     </div>
@@ -152,20 +142,21 @@ function StatusNote({ unconfirmed }: { unconfirmed?: boolean }) {
   return (
     <div className="rounded-2xl border border-line bg-surface p-6">
       <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint mb-3">
-        <Timer className="h-3.5 w-3.5" />
+        <Clock className="h-3.5 w-3.5" />
         {unconfirmed ? "Couldn't confirm" : "Awaiting payment"}
       </div>
       {unconfirmed ? (
         <p className="text-sm text-ink-dim leading-relaxed">
           We saw funds arrive but couldn't confirm the outcome from this
-          session — it may already have been forwarded in an earlier visit
-          to this page. Check the destination address directly, or reissue
-          if you're unsure.
+          session — they may already have been settled in an earlier visit to
+          this page. Check the Arc payout address directly, or reissue if
+          you're unsure.
         </p>
       ) : (
         <p className="text-sm text-ink-dim leading-relaxed">
-          No expiry, no pre-signed window — send whenever you're ready and
-          it'll be picked up and forwarded automatically.
+          No expiry, no pre-signed window — the payer can send whenever
+          they're ready and it'll be picked up and settled to Arc
+          automatically.
         </p>
       )}
     </div>
@@ -175,16 +166,14 @@ function StatusNote({ unconfirmed }: { unconfirmed?: boolean }) {
 function InvoiceDocument({
   issued,
   amountStr,
-  destGateId,
-  originGateId,
+  originId,
   status,
   copiedAddr,
   onCopyAddr,
 }: {
   issued: IssuedInvoice;
   amountStr: string;
-  destGateId: GateId;
-  originGateId?: GateId;
+  originId?: SupportedChainId;
   status: "paid" | "awaiting";
   copiedAddr: boolean;
   onCopyAddr: () => void;
@@ -196,16 +185,13 @@ function InvoiceDocument({
   return (
     <article className="relative overflow-hidden rounded-2xl border border-line bg-surface">
       <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-amber-500/[0.06] via-surface to-surface" />
-      <div className="absolute top-6 right-6 opacity-[0.05] text-ink font-display font-semibold text-6xl tracking-tighter pointer-events-none select-none">
-        ARRIVALS
-      </div>
 
       <div className="relative px-8 pt-8 pb-6 border-b border-dashed border-line">
         <div className="flex items-start justify-between gap-6 flex-wrap">
           <div>
             <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
               <CircleDollarSign className="h-3.5 w-3.5" />
-              Manifest · {issued.invoiceNumber}
+              Invoice · {issued.invoiceNumber}
             </div>
             <h1 className="font-display mt-3 text-2xl font-semibold tracking-tight text-ink">
               {issued.meta.companyName || "Untitled invoice"}
@@ -227,13 +213,13 @@ function InvoiceDocument({
           />
           <Meta
             icon={<CircleDollarSign className="h-3.5 w-3.5" />}
-            label="Bill to"
+            label="Pay out to (Arc)"
             value={<span className="font-mono text-xs">{short(payeeDisplay)}</span>}
             title={payeeDisplay}
           />
           <Meta
             icon={<Clock className="h-3.5 w-3.5" />}
-            label="Filed"
+            label="Issued"
             value={new Date(issued.issuedAt).toLocaleString(undefined, {
               month: "short",
               day: "numeric",
@@ -248,7 +234,7 @@ function InvoiceDocument({
       <div
         className={
           "relative px-8 py-8 border-b border-dashed border-line items-end " +
-          (originGateId !== undefined ? "" : "grid sm:grid-cols-[1.2fr_1fr] gap-6")
+          (originId !== undefined ? "" : "grid sm:grid-cols-[1.2fr_1fr] gap-6")
         }
       >
         <div>
@@ -263,37 +249,37 @@ function InvoiceDocument({
             <span className="ml-1 text-sm font-medium text-ink-dim">USDC</span>
           </div>
         </div>
-        {originGateId === undefined && (
+        {originId === undefined && (
           <div className="sm:text-right">
             <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-              Destination
+              Settles on
             </div>
             <div className="mt-2 inline-flex">
-              <GateBadge id={destGateId} size="lg" active />
+              <NetworkBadge id="arc" size="lg" active />
             </div>
           </div>
         )}
         <EdgeNotches />
       </div>
 
-      {originGateId !== undefined && (
+      {originId !== undefined && (
         <div className="relative px-8 py-6 border-b border-dashed border-line">
           <div className="flex items-end gap-3">
             <div className="flex flex-col items-start gap-2">
               <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-                Origin
+                Paid from
               </div>
-              <GateBadge id={originGateId} size="lg" tone="origin" active />
+              <NetworkBadge id={originId} size="lg" active />
             </div>
-            <div className="relative flex-1 h-10 min-w-[48px]">
+            <div className="relative flex-1 h-10 min-w-[48px] flex items-center justify-center">
               <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 border-t border-dashed border-line" />
-              <Plane aria-hidden className="route-plane h-3.5 w-3.5 text-[#5b8cff]" />
+              <ArrowRight className="relative h-4 w-4 text-amber-400 bg-surface px-0.5" />
             </div>
             <div className="flex flex-col items-start gap-2">
               <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-                Destination
+                Settled on
               </div>
-              <GateBadge id={destGateId} size="lg" active />
+              <NetworkBadge id="arc" size="lg" active />
             </div>
           </div>
         </div>
@@ -305,7 +291,7 @@ function InvoiceDocument({
             Invoice settled
           </div>
           <div className="mt-1 text-sm text-ink-dim">
-            This invoice has been paid and forwarded. The deposit address
+            This invoice has been paid and settled to Arc. The deposit address
             below is no longer monitored — don't send anything else to it.
           </div>
           <div className="mt-4 rounded-xl border border-dashed border-line bg-bg p-4">
@@ -323,12 +309,12 @@ function InvoiceDocument({
                   Send USDC to this address
                 </div>
                 <div className="mt-1 text-sm text-ink-dim">
-                  Pay from any gate below — funds forward to the recipient's
-                  preferred network the moment they arrive.
+                  Pay from any origin network below — funds are bridged to the
+                  merchant's Arc account the moment they arrive.
                 </div>
               </div>
               <span className="hidden sm:inline-flex h-9 w-9 rounded-md bg-amber-50 text-amber-400 items-center justify-center shrink-0">
-                <PlaneLanding className="h-4 w-4" />
+                <ArrowUpRight className="h-4 w-4" />
               </span>
             </div>
 
@@ -363,7 +349,7 @@ function InvoiceDocument({
           <div className="relative px-8 py-7">
             <div className="flex items-center justify-between mb-3">
               <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-                {isMobile ? "Open gates · tap to pay from your wallet" : "Open gates"}
+                {isMobile ? "Origin networks · tap to pay from your wallet" : "Origin networks"}
               </div>
               <div className="text-[11px] text-ink-faint">USDC only</div>
             </div>
@@ -374,10 +360,10 @@ function InvoiceDocument({
                     key={c.id}
                     href={buildErc681Link(c.id, issued.invoiceAddress, issued.invoice.amount)}
                   >
-                    <GateBadge id={c.id} />
+                    <NetworkBadge id={c.id} />
                   </a>
                 ) : (
-                  <GateBadge key={c.id} id={c.id} />
+                  <NetworkBadge key={c.id} id={c.id} />
                 ),
               )}
             </div>
@@ -388,9 +374,9 @@ function InvoiceDocument({
       <div className="relative border-t border-dashed border-line px-8 py-4 flex items-center justify-between text-[11px] text-ink-faint">
         <span className="inline-flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5" />
-          Self-routing across chains
+          Settled on Arc · USDC-native
         </span>
-        <span className="font-mono">v2</span>
+        <span className="font-mono">v7</span>
       </div>
     </article>
   );
@@ -407,77 +393,56 @@ function EdgeNotches() {
 
 function PaidCard({
   relay,
-  destination,
+  payoutAddress,
   destinationTxHash,
   destinationAmountFormatted,
 }: {
   relay?: RelayResult;
-  destination: Destination;
+  payoutAddress: string;
   destinationTxHash?: string;
   destinationAmountFormatted?: string;
 }) {
   if (!relay || relay.status !== "relayed") return null;
 
-  const recipientLabel =
-    destination.type === "solana"
-      ? "Solana"
-      : destination.type === "robinhood"
-        ? "Robinhood Chain"
-        : CHAIN_LABEL[destination.chainId];
+  // The final delivery tx is on Arc, reported by Relay's status endpoint
+  // (distinct from the origin-chain deposit hash in relay.relayTxHash).
+  const finalTxHash = destinationTxHash;
 
-  const landedUnit = destination.type === "robinhood" ? "USDG" : "USDC";
-
-  // Same-chain: relayTxHash IS the final transfer. Cross-chain: use the
-  // real destination-chain tx (from Relay's status endpoint — confirmed
-  // live against real completed invoices), not the origin-chain
-  // relay/deposit hash.
-  const finalTxHash = relay.mode === "same-chain" ? relay.relayTxHash : destinationTxHash;
-
-  // Same-chain: no bridging fee at all, the full relayed amount lands
-  // exactly. Cross-chain: use Relay's confirmed net amount once available
-  // (from their status endpoint), since that's after their bridging fee
-  // — falls back to the relay's own amount if not loaded yet.
+  // Prefer Relay's confirmed net amount on Arc (after bridging fee); fall
+  // back to the swept origin amount if the status hasn't loaded yet.
   const landedAmountFormatted =
-    relay.mode === "same-chain"
-      ? formatUnits(BigInt(relay.amount), 6)
-      : (destinationAmountFormatted ?? formatUnits(BigInt(relay.amount), 6));
+    destinationAmountFormatted ?? formatUnits(BigInt(relay.amount), 6);
 
-  const finalLink = (() => {
-    if (!finalTxHash) return undefined;
-    if (destination.type === "solana") {
-      return `https://solscan.io/tx/${finalTxHash}`;
-    }
-    if (destination.type === "robinhood") {
-      return `https://robinhoodchain.blockscout.com/tx/${finalTxHash}`;
-    }
-    const chain = CHAINS.find((c) => c.id === destination.chainId);
-    const base = chain?.blockExplorers?.default.url.replace(/\/$/, "");
-    return base ? `${base}/tx/${finalTxHash}` : undefined;
-  })();
+  const finalLink = finalTxHash ? arcTxUrl(finalTxHash) : undefined;
 
   return (
     <div className="rounded-2xl border border-green-500/30 bg-green-50 p-6">
       <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-green-300 mb-3">
         <CheckCircle2 className="h-3.5 w-3.5" />
-        Landed
+        Settled on Arc
       </div>
       <div className="text-sm text-ink-dim leading-relaxed">
-        {landedAmountFormatted} {landedUnit} forwarded to the payee on {recipientLabel}.
+        {landedAmountFormatted} USDC delivered to the payee on Arc.
       </div>
       <div className="mt-3 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
         Paid to
       </div>
-      <div className="mt-1 font-mono text-xs text-ink break-all">
-        {destination.address}
-      </div>
+      <a
+        href={arcAddressUrl(payoutAddress)}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1 inline-block font-mono text-xs text-ink break-all hover:text-amber-300"
+      >
+        {payoutAddress}
+      </a>
       {finalLink && (
         <a
           href={finalLink}
           target="_blank"
           rel="noreferrer"
-          className="mt-3 inline-flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium"
+          className="mt-3 flex w-fit items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium"
         >
-          View final transaction
+          View settlement on Arc
           <ExternalLink className="h-3 w-3" />
         </a>
       )}
@@ -487,46 +452,41 @@ function PaidCard({
 
 function SettlementProgress({
   settlement,
-  destGateId,
 }: {
   settlement: ReturnType<typeof useInvoiceSettlement>;
-  destGateId: GateId;
 }) {
   const sourceLabel = settlement.source
-    ? `Gate ${gateLetter(settlement.source.chainId)} · ${CHAIN_LABEL[settlement.source.chainId]}`
-    : "any gate";
+    ? CHAIN_LABEL[settlement.source.chainId]
+    : "any network";
 
   const boardStatus = settlement.complete
-    ? "LANDED"
+    ? "SETTLED"
     : settlement.relay?.status === "relayed"
-      ? "FORWARDING"
+      ? "BRIDGING"
       : settlement.source
         ? "RECEIVED"
         : "AWAITING";
 
-  const boardTone =
-    boardStatus === "LANDED" ? "green" : boardStatus === "AWAITING" ? "ink" : "amber";
+  const boardTone: "green" | "amber" | "ink" =
+    boardStatus === "SETTLED" ? "green" : boardStatus === "AWAITING" ? "ink" : "amber";
 
   const relayed = settlement.relay?.status === "relayed" ? settlement.relay : undefined;
-  const isSameChain = relayed?.mode === "same-chain";
 
   const steps = [
     {
       done: !!settlement.source,
-      title: settlement.source ? `Funds received at ${sourceLabel}` : "Waiting for funds",
+      title: settlement.source ? `Funds received on ${sourceLabel}` : "Waiting for funds",
       detail: settlement.source
         ? formatAmount(settlement.source.amount)
-        : "Send USDC to any open gate",
+        : "Send USDC to any origin network",
       chainId: settlement.source?.chainId,
       txHash: settlement.source?.txHash,
     },
     {
       done: !!relayed,
-      title: "Forward triggered",
+      title: "Bridging to Arc",
       detail: relayed
-        ? relayed.mode === "same-chain"
-          ? "Direct relay"
-          : "Cross-chain via settlement network"
+        ? "Relay deposit submitted"
         : settlement.source
           ? "Triggering…"
           : "Pending",
@@ -535,10 +495,10 @@ function SettlementProgress({
     },
     {
       done: settlement.complete,
-      title: isSameChain ? "Delivered" : `Landed at Gate ${gateLetter(destGateId)}`,
+      title: "Settled on Arc",
       detail: settlement.complete
         ? "Confirmed"
-        : relayed && !isSameChain
+        : relayed
           ? (settlement.bridgeStatus ?? "Awaiting fill…")
           : "Pending",
     },
@@ -548,12 +508,10 @@ function SettlementProgress({
     <div className="rounded-2xl border border-line bg-surface p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-          <PlaneLanding className="h-3.5 w-3.5" />
-          Status board
+          <ShieldCheck className="h-3.5 w-3.5" />
+          Settlement status
         </div>
-      </div>
-      <div className="mb-5">
-        <SplitFlap text={boardStatus} tone={boardTone} />
+        <StatusPill text={boardStatus} tone={boardTone} />
       </div>
       <ol className="space-y-3">
         {steps.map((s, i) => {
@@ -563,6 +521,39 @@ function SettlementProgress({
         })}
       </ol>
     </div>
+  );
+}
+
+function StatusPill({
+  text,
+  tone,
+}: {
+  text: string;
+  tone: "green" | "amber" | "ink";
+}) {
+  const toneClass =
+    tone === "green"
+      ? "bg-green-50 text-green-300 ring-green-500/30"
+      : tone === "amber"
+        ? "bg-amber-50 text-amber-300 ring-amber-500/30"
+        : "bg-surface-2 text-ink-dim ring-line";
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full ring-1 text-[10px] font-mono font-medium uppercase tracking-widest " +
+        toneClass
+      }
+    >
+      {tone !== "ink" && (
+        <span
+          className={
+            "h-1.5 w-1.5 rounded-full " +
+            (tone === "green" ? "bg-green-500" : "bg-amber-500 pulse-dot")
+          }
+        />
+      )}
+      {text}
+    </span>
   );
 }
 
@@ -601,7 +592,7 @@ function ProgressStep({
           {title}
         </div>
         <div className="mt-0.5 text-xs text-ink-dim flex w-fit items-center gap-1.5">
-          {chainId !== undefined && <GateDot id={chainId} />}
+          {chainId !== undefined && <ChainDot id={chainId as NetworkId} />}
           <span className="tabular font-mono">{detail}</span>
         </div>
         {explorerUrl && txHash && (
@@ -634,7 +625,7 @@ function StatusBadge({ status }: { status: "paid" | "awaiting" }) {
       <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full ring-1 ring-green-500/30 bg-green-50 text-green-300 text-xs font-mono font-medium uppercase tracking-wider">
         <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
         <CheckCircle2 className="h-3.5 w-3.5" />
-        Landed
+        Settled
       </span>
     );
   }
@@ -675,9 +666,9 @@ function Meta({
 
 // ERC-681: ethereum:<token contract>@<chainId>/transfer?address=<recipient>&uint256=<amount>
 // USDC is an ERC-20, so the URI targets the token contract's transfer()
-// function, not the recipient directly. Wallet support for this exact
-// form varies — well-supported in MetaMask mobile, but some wallets only
-// handle the plain native-currency variant and may ignore this.
+// function, not the recipient directly. Wallet support for this exact form
+// varies — well-supported in MetaMask mobile, but some wallets only handle
+// the plain native-currency variant and may ignore this.
 function buildErc681Link(chainId: SupportedChainId, recipient: string, amount: bigint): string {
   return `ethereum:${USDC[chainId]}@${chainId}/transfer?address=${recipient}&uint256=${amount.toString()}`;
 }

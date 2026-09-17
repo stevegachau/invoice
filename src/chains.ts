@@ -1,11 +1,12 @@
 import { base, arbitrum, polygon } from "viem/chains";
 import type { Address } from "viem";
 
-// Only these 3 — matches invoice-relay-fn's chains.js exactly, which in
-// turn matches what PayAI's facilitator actually covers (confirmed live
-// against its /supported endpoint). Ethereum mainnet and Optimism are
-// genuinely not covered — don't add them back here without a working
-// gasless-relay path for them first.
+// Origin chains — where payers send USDC from. Only these 3, matching the
+// relay function's origins, which in turn match what PayAI's facilitator
+// covers gaslessly (confirmed live against its /supported endpoint).
+// Ethereum mainnet and Optimism are genuinely not covered — don't add them
+// back without a working gasless-relay path first. Arc is NOT here: it's
+// the settlement destination, never an origin (see ARC below).
 export const CHAINS = [base, arbitrum, polygon] as const;
 
 export type SupportedChainId = (typeof CHAINS)[number]["id"];
@@ -15,6 +16,25 @@ export const CHAIN_LABEL: Record<SupportedChainId, string> = {
   [arbitrum.id]: "Arbitrum",
   [polygon.id]: "Polygon",
 };
+
+// Arc — Circle's USDC-native L1 and the one settlement chain. Every invoice
+// pays out here in USDC (Arc's native gas asset). Chain id 5042, mainnet
+// live 2026-09-16. We never read balances or relay FROM Arc, so it isn't a
+// viem chain in CHAINS — this descriptor is only for display and the
+// settlement explorer link. Explorer URL confirmed via Relay's /chains.
+export const ARC = {
+  id: 5042,
+  label: "Arc",
+  explorerUrl: "https://explorer.arc.io",
+} as const;
+
+export function arcTxUrl(txHash: string): string {
+  return `${ARC.explorerUrl}/tx/${txHash}`;
+}
+
+export function arcAddressUrl(address: string): string {
+  return `${ARC.explorerUrl}/address/${address}`;
+}
 
 export const USDC: Record<SupportedChainId, Address> = {
   [base.id]: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",

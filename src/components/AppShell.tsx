@@ -36,14 +36,14 @@ function TopBar() {
             </span>
             <span className="text-ink-faint">|</span>
             <span className="text-[13px] text-ink-dim">
-              Self-Routing Payments
+              USDC settlement on Arc
             </span>
           </span>
         </a>
 
         <div className="hidden sm:flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-ink-faint">
           <span className="h-1.5 w-1.5 rounded-full bg-green-500 pulse-dot" />
-          Tower online
+          Arc mainnet · live
         </div>
       </div>
     </header>
@@ -54,9 +54,8 @@ function BottomBar() {
   return (
     <footer className="border-t border-line-soft">
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between text-[11px] font-mono text-ink-faint uppercase tracking-wider">
-        <span className="inline-flex items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-green-500 pulse-dot" />
-          All systems operational
+        <span className="inline-flex items-center gap-2 normal-case">
+          Powered by Circle Arc · USDC-native settlement
         </span>
         <div className="flex items-center gap-4">
           <a href="/api-docs" className="text-ink-faint hover:text-ink transition normal-case">

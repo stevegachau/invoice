@@ -3,9 +3,10 @@ import type { IssuedInvoice } from "./invoice";
 import type { Destination, RelayResult } from "./relayApi";
 
 const HASH_PREFIX = "i=";
-const VERSION = 6; // bumped: dropped the whole MEE/Across supertx model —
-// invoices are now just {invoiceId, destination, amount}, backed by the
-// relay Cloud Function instead of pre-signed supertransactions.
+const VERSION = 7; // must match the relay function's SHARE_HASH_VERSION.
+// v7: settlement is always Arc, so `dest` is now { type: "arc", address }.
+// Dropped the multi-destination (Solana/Robinhood/any-EVM) model, so v6
+// links no longer decode.
 
 type Wire = {
   v: number;

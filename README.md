@@ -1,59 +1,56 @@
-# Invoices | Self-Routing Payments
+# Invoices | USDC Settlement on Arc
 
-A cross-chain USDC invoicing app. Issue an invoice, get one link. Your
-customer sends USDC on whichever of 3 chains they hold it on; it's
-forwarded to your payout address automatically, gaslessly — no wallet
-connect, no chain selection, no gas ever required from either side.
+A USDC invoicing app that settles on **Arc**, Circle's USDC-native L1.
+Issue an invoice, share one link. Your customer sends USDC on whichever of
+3 origin chains they hold it on (Base, Arbitrum, Polygon); it's bridged to
+your Arc account automatically and gaslessly — no wallet connect, no chain
+selection, no gas ever required from either side. On Arc, USDC is the
+native gas asset, so funds arrive spendable ("gas in dollars").
 
 ## Architecture
 
 The relay backend ships **in this same repo** as a stateless Vercel
 serverless function at [`api/relay.js`](api/relay.js) (exposed at
-`/api/relay`). It was originally a separate Google Cloud Function
-(`invoice-relay-fn`); the logic is unchanged, only the HTTP entrypoint was
-swapped so the frontend and backend deploy together — one repo, one
-origin, no CORS, no separate backend URL to configure. Quick summary of
-how the two halves fit together:
+`/api/relay`), so the frontend and backend deploy together — one repo, one
+origin, no CORS. Settlement uses [Relay](https://relay.link) deposit
+addresses; the origin-chain relay is paid for by PayAI's free x402
+facilitator. Quick summary of how the two halves fit together:
 
 1. **Issuing an invoice** generates a random `invoiceId` client-side and
    calls the backend's `address` action, which deterministically derives
-   a plain EOA address from `HMAC(masterSecret, invoiceId)` — same
+   a plain EOA address from `HMAC(masterSecret, invoiceId)` — the same
    address on Base, Arbitrum, and Polygon automatically, since it's a
    real keypair, not a smart-contract account.
-2. **The frontend polls that address** across the 3 chains directly
-   against public RPCs (no backend involved in this step) — same
-   adaptive log-scanning approach used throughout this project.
+2. **The frontend polls that address** across the 3 origin chains directly
+   against public RPCs (no backend involved in this step) via adaptive
+   log-scanning.
 3. **On detecting inflow**, it calls the backend's `relay` action with
-   `{invoiceId, chainId, destination}`. The backend re-reads the live
-   balance itself (never trusts the frontend's number) and either relays
-   directly (same-chain) or via a NEAR 1Click quote (cross-chain,
-   including to Solana), through PayAI's free x402 facilitator — which
-   pays the gas. See `invoice-relay-fn`'s README for the full mechanism
-   and the debugging history behind why it's built this way (in short: a
-   Biconomy MEE-based pre-signed approach was tried first and abandoned —
-   its sponsorship/feeToken modes turned out not to support "sign now,
-   wait indefinitely for an unknown future deposit" cleanly).
-4. **Cross-chain relays** get tracked to completion by polling 1Click's
-   own `/v0/status` endpoint directly from the browser; same-chain
-   relays are complete the moment the relay call returns.
-5. **The URL hash is still the only "database"** — same principle as
-   before, just carrying less: `{invoiceId, destination, amount, meta}`,
-   plus the relay result once available so reopening the link shows
-   "complete" without re-scanning.
+   `{invoiceId, chainId, destination}` (destination is always
+   `{ type: "arc", address }`). The backend re-reads the live balance
+   itself (never trusts the frontend's number), requests a Relay
+   deposit-address quote (origin USDC → Arc native USDC), and relays the
+   whole balance to that deposit address through PayAI's free x402
+   facilitator, which pays the origin-chain gas. Relay's solver network
+   delivers USDC on Arc. There is no same-chain path — Arc can't be an
+   origin (no x402 facilitator covers Arc yet), so every settlement is
+   cross-chain.
+4. **Settlement** is tracked to completion by polling Relay's status
+   endpoint by deposit address (proxied through the `status` action to
+   avoid browser CORS), until it reports the Arc-side fill.
+5. **The URL hash is the only "database"** — `{invoiceId, destination,
+   amount, meta}`, plus the relay result once available so reopening the
+   link shows "settled" without re-scanning.
 
-## What changed from the MEE/Across version
+## Arc settlement notes
 
-Everything that used to live in `abi.ts`, `across.ts`, `solanaInvoice.ts`,
-`useSolanaSettlement.ts`, and most of `invoice.ts` is gone — that
-functionality now lives entirely in `invoice-relay-fn`. The
-`@biconomy/abstractjs` dependency is removed. `InvoicePay.tsx` and the old
-`SolanaInvoicePay.tsx` are merged into one component, since both EVM and
-Solana destinations now go through the same backend call shape.
-
-Supported chains dropped from 5 to 3 (Base, Arbitrum, Polygon) — matches
-exactly what PayAI's facilitator covers gaslessly, confirmed live against
-its `/supported` endpoint. Ethereum mainnet and Optimism were removed
-rather than kept as a degraded "not actually gasless" option.
+- **Arc**: chain id `5042`, mainnet live 2026-09-16. USDC is the native
+  gas asset, addressed on Relay as the native currency (`0x0000…0000`).
+- **Origins**: Base, Arbitrum, Polygon — the chains PayAI's facilitator
+  covers gaslessly (confirmed against its `/supported` endpoint). Ethereum
+  mainnet and Optimism aren't covered and are deliberately excluded.
+- Earlier destinations (Solana, Robinhood Chain) and the unused NEAR 1Click
+  status path were removed in the Arc pivot; the share-hash format is now
+  `v7` (older links no longer decode).
 
 ## Setup
 

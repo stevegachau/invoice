@@ -8,22 +8,12 @@ import {
   CircleDollarSign,
   FileText,
   Loader2,
-  Send,
   User,
 } from "lucide-react";
-import { CHAINS, CHAIN_LABEL, type SupportedChainId } from "../chains";
+import { CHAINS } from "../chains";
 import { issueInvoice, type IssuedInvoice } from "../invoice";
-import { isValidSolanaPubkey } from "../solana";
 import { previewQuote, type Destination, type PreviewQuote } from "../relayApi";
-import { GateDot, gateLetter, SOLANA_GATE_ID, ROBINHOOD_GATE_ID, type GateId } from "./GateBadge";
-
-const GATES: GateId[] = [...CHAINS.map((c) => c.id), SOLANA_GATE_ID, ROBINHOOD_GATE_ID];
-
-function gateLabel(id: GateId): string {
-  if (id === SOLANA_GATE_ID) return "Solana";
-  if (id === ROBINHOOD_GATE_ID) return "Robinhood";
-  return CHAIN_LABEL[id as SupportedChainId];
-}
+import { ChainDot, networkLabel } from "./NetworkBadge";
 
 export function InvoiceForm({
   onIssued,
@@ -32,21 +22,12 @@ export function InvoiceForm({
 }) {
   const [companyName, setCompanyName] = useState("");
   const [description, setDescription] = useState("");
-  const [destinationGate, setDestinationGate] = useState<GateId>(CHAINS[0].id);
   const [payee, setPayee] = useState("");
   const [amount, setAmount] = useState("25");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isSolana = destinationGate === SOLANA_GATE_ID;
-  const isRobinhood = destinationGate === ROBINHOOD_GATE_ID;
-  // Solana and Robinhood are both destination-only — there's no "send from
-  // the same gate you're settling to" option for either, unlike the 3 EVM
-  // gates. The "Same-gate fee: Sponsored" summary row only makes sense when
-  // that option actually exists.
-  const hasSameGateOption = !isSolana && !isRobinhood;
-  const destUnit = isRobinhood ? "USDG" : "USDC";
-  const validAddress = isSolana ? isValidSolanaPubkey(payee) : isAddress(payee);
+  const validAddress = isAddress(payee);
   const validAmount = (() => {
     const n = Number(amount);
     return Number.isFinite(n) && n > 0;
@@ -54,31 +35,18 @@ export function InvoiceForm({
   const validCompany = companyName.trim().length > 0;
   const canSubmit = validAddress && validAmount && validCompany && !busy;
 
-  // Shared between the preview-quote effect and the actual submit — one
-  // place to build a Destination from the current gate + payee, so the
-  // three destination types stay in sync as new ones get added.
   function buildDestination(): Destination {
-    if (isSolana) return { type: "solana", address: payee };
-    if (isRobinhood) return { type: "robinhood", address: payee as Address };
-    return {
-      type: "evm",
-      chainId: destinationGate as SupportedChainId,
-      address: payee as Address,
-    };
+    return { type: "arc", address: payee as Address };
   }
 
   const [preview, setPreview] = useState<PreviewQuote | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewFailed, setPreviewFailed] = useState(false);
 
-  // Fires once the payee address is valid (and on subsequent amount/gate
-  // changes) — debounced so it doesn't fire on every keystroke. Since the
-  // payer's actual origin chain isn't known yet at this point, this quotes
-  // a representative "if paid from a different gate" scenario (any chain
-  // other than the destination) to show what a cross-chain bridging fee
-  // would look like. Same-gate payments are always free — no quote is
-  // needed to know that. Robinhood is destination-only, so it always uses
-  // this cross-chain preview path — there's no same-gate case for it.
+  // Fires once the payout address is valid (and on amount changes),
+  // debounced. The payer's actual origin chain isn't known at issue time,
+  // so this quotes a representative origin (Base) -> Arc to preview how much
+  // USDC lands after Relay's bridging fee.
   useEffect(() => {
     if (!validAddress || !validAmount) {
       setPreview(null);
@@ -86,8 +54,6 @@ export function InvoiceForm({
       return;
     }
 
-    const previewOriginChainId =
-      CHAINS.find((c) => c.id !== destinationGate)?.id ?? CHAINS[0].id;
     const destination = buildDestination();
 
     let cancelled = false;
@@ -97,7 +63,7 @@ export function InvoiceForm({
     const t = setTimeout(async () => {
       try {
         const result = await previewQuote({
-          originChainId: previewOriginChainId,
+          originChainId: CHAINS[0].id,
           destination,
           amount: parseUnits(amount, 6),
         });
@@ -117,7 +83,7 @@ export function InvoiceForm({
       clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [validAddress, validAmount, payee, amount, destinationGate, isSolana, isRobinhood]);
+  }, [validAddress, validAmount, payee, amount]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -125,13 +91,10 @@ export function InvoiceForm({
     setBusy(true);
     setError(null);
     try {
-      const destination = buildDestination();
-
       const issued = await issueInvoice(
-        { destination, amount: parseUnits(amount, 6) },
+        { destination: buildDestination(), amount: parseUnits(amount, 6) },
         { companyName: companyName.trim(), description: description.trim() },
       );
-
       onIssued(issued);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -147,22 +110,18 @@ export function InvoiceForm({
       onSubmit={handleSubmit}
       className="rounded-2xl border border-line bg-surface overflow-hidden"
     >
-      <header className="px-7 pt-7 pb-5 border-b border-dashed border-line flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
-            <Send className="h-3.5 w-3.5" />
-            Manifest · new
-          </div>
-          <h2 className="font-display mt-2 text-2xl font-semibold tracking-tight text-ink">
-            Request payment
-          </h2>
-          <p className="mt-1 text-sm text-ink-dim">
-            USDC, settled across chains. Payer can send from any gate below.
-          </p>
+      <header className="px-7 pt-7 pb-5 border-b border-dashed border-line">
+        <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.14em] text-ink-faint">
+          <CircleDollarSign className="h-3.5 w-3.5" />
+          New invoice
         </div>
-        <span className="shrink-0 rounded-md border border-line bg-surface-2 px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-ink-faint">
-          Form 3B
-        </span>
+        <h2 className="font-display mt-2 text-2xl font-semibold tracking-tight text-ink">
+          Request payment
+        </h2>
+        <p className="mt-1 text-sm text-ink-dim">
+          Billed in USDC, settled on Arc. Your customer pays from Base,
+          Arbitrum, or Polygon — it lands in your Arc account automatically.
+        </p>
       </header>
 
       <section className="px-7 pt-7 grid sm:grid-cols-2 gap-4">
@@ -170,7 +129,7 @@ export function InvoiceForm({
           <input
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
-            placeholder="Loud Socks Studio"
+            placeholder="Acme Capital"
             className="flex-1 bg-transparent py-3 text-sm text-ink placeholder:text-ink-faint outline-none"
           />
         </Field>
@@ -182,7 +141,7 @@ export function InvoiceForm({
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Podcast intro pack, batch two"
+            placeholder="Invoice 0921 — advisory retainer"
             className="flex-1 bg-transparent py-3 text-sm text-ink placeholder:text-ink-faint outline-none"
           />
         </Field>
@@ -208,75 +167,22 @@ export function InvoiceForm({
               />
             </div>
             <div className="mt-1.5 text-xs text-ink-dim tabular font-mono">
-              ≈ {formattedAmount} {destUnit}
+              ≈ {formattedAmount} USDC
             </div>
           </div>
           <span className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-green-50 ring-1 ring-green-500/30 text-green-300 text-xs font-mono font-medium">
             <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-            {destUnit}
+            USDC
           </span>
         </div>
         <p className="mt-2 text-[11px] text-ink-faint">
-          {isRobinhood
-            ? "Payer still sends USDC — delivered to you as USDG on Robinhood Chain."
-            : "Whatever actually arrives gets forwarded — this amount is just what shows on the invoice."}
+          Whatever actually arrives gets settled — this amount is just what
+          shows on the invoice.
         </p>
       </section>
 
       <section className="px-7 pt-6">
-        <div className="flex items-center justify-between">
-          <Label>Settle at gate</Label>
-          <span className="text-[11px] text-ink-faint">
-            Where you receive the funds
-          </span>
-        </div>
-        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {GATES.map((id) => {
-            const selected = id === destinationGate;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setDestinationGate(id)}
-                className={
-                  "group relative rounded-lg border px-3 py-3 text-sm transition flex flex-col items-center justify-center gap-1 " +
-                  (selected
-                    ? "border-amber-500/50 bg-amber-50 text-ink ring-1 ring-amber-500/30"
-                    : "border-line bg-bg text-ink-dim hover:border-line hover:bg-surface-2")
-                }
-              >
-                <span className="text-[9px] font-mono uppercase tracking-widest text-ink-faint">
-                  Gate {gateLetter(id)}
-                </span>
-                <span className="inline-flex items-center gap-1.5 font-medium">
-                  <GateDot id={id} />
-                  {gateLabel(id)}
-                </span>
-                {selected && (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-amber-400 absolute top-1.5 right-1.5" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-        {isSolana && (
-          <p className="mt-2 text-[11px] text-ink-faint leading-relaxed">
-            Payer still sends from any of the 3 EVM gates — Solana is a
-            settlement destination, funds bridge straight to the payee's
-            Solana wallet.
-          </p>
-        )}
-        {isRobinhood && (
-          <p className="mt-2 text-[11px] text-ink-faint leading-relaxed">
-            Payer still sends USDC from any of the 3 EVM gates — Robinhood
-            Chain is a settlement destination, funds bridge and convert to
-            USDG automatically.
-          </p>
-        )}
-      </section>
-
-      <section className="px-7 pt-6">
-        <Label>{isSolana ? "Payee Solana address" : "Payee address"}</Label>
+        <Label>Your Arc payout address</Label>
         <div
           className={
             "mt-2 flex items-center gap-3 rounded-lg border bg-bg pl-4 pr-2 transition " +
@@ -289,9 +195,7 @@ export function InvoiceForm({
           <input
             value={payee}
             onChange={(e) => setPayee(e.target.value.trim())}
-            placeholder={
-              isSolana ? "Solana wallet address (base58)" : "0x… or yourname.eth"
-            }
+            placeholder="0x… — your address on Arc"
             className="flex-1 bg-transparent py-3 text-sm text-ink font-mono placeholder:text-ink-faint outline-none"
           />
           {validAddress && (
@@ -301,36 +205,57 @@ export function InvoiceForm({
             </span>
           )}
         </div>
-        {payee && !validAddress && (
+        {payee && !validAddress ? (
           <p className="mt-1.5 text-xs text-red-400 inline-flex items-center gap-1">
             <AlertCircle className="h-3 w-3" />
-            {isSolana ? "Not a valid Solana address" : "Not a valid address"}
+            Not a valid Arc address
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[11px] text-ink-faint leading-relaxed">
+            USDC is Arc's native asset — funds arrive spendable, gas included.
+            Arc is EVM-compatible, so this is a standard 0x address.
           </p>
         )}
       </section>
 
       <section className="px-7 pt-6">
+        <div className="flex items-center justify-between">
+          <Label>Payable from</Label>
+          <span className="text-[11px] text-ink-faint">Origin networks</span>
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {CHAINS.map((c) => (
+            <span
+              key={c.id}
+              className="inline-flex items-center gap-2 h-8 px-3 rounded-md border border-line bg-surface-2 text-ink-dim text-[11px] font-mono uppercase tracking-wider"
+            >
+              <ChainDot id={c.id} />
+              {networkLabel(c.id)}
+            </span>
+          ))}
+        </div>
+      </section>
+
+      <section className="px-7 pt-6">
         <div className="rounded-xl bg-surface-2 border border-dashed border-line p-4 space-y-2 text-sm">
           <SummaryRow label="From" value={companyName.trim() || "—"} />
-          <SummaryRow label="Amount" value={`${formattedAmount} ${destUnit}`} />
+          <SummaryRow label="Amount" value={`${formattedAmount} USDC`} />
           <SummaryRow
-            label="Settles at"
-            value={`Gate ${gateLetter(destinationGate)} · ${gateLabel(destinationGate)}`}
-            tag={<GateDot id={destinationGate} />}
+            label="Settles on"
+            value="Arc"
+            tag={<ChainDot id="arc" />}
+            accent="amber"
           />
-          {hasSameGateOption && (
-            <SummaryRow label="Same-gate fee" value="Sponsored" accent="green" />
-          )}
           <SummaryRow
-            label={hasSameGateOption ? "Other gates" : "Delivers as"}
+            label="Est. received"
             value={
               previewLoading
                 ? "Estimating…"
                 : preview?.amountOutFormatted
-                  ? `~${preview.amountOutFormatted} ${destUnit} arrives`
+                  ? `~${preview.amountOutFormatted} USDC on Arc`
                   : previewFailed
                     ? "Estimate unavailable"
-                    : "Enter payee address"
+                    : "Enter payout address"
             }
           />
         </div>
@@ -362,8 +287,8 @@ export function InvoiceForm({
           )}
         </button>
         <p className="mt-3 text-[11px] text-center text-ink-faint">
-          One address, live on all 3 gates. Whatever arrives gets forwarded
-          automatically, gaslessly — no expiry, no pre-signed window.
+          One deposit address across all three origin networks. Whatever
+          arrives is bridged to Arc automatically, gaslessly — no expiry.
         </p>
       </footer>
     </form>
@@ -414,7 +339,7 @@ function SummaryRow({
   label: string;
   value: string;
   tag?: React.ReactNode;
-  accent?: "green";
+  accent?: "amber";
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -422,7 +347,7 @@ function SummaryRow({
       <span
         className={
           "inline-flex items-center gap-1.5 font-medium tabular font-mono " +
-          (accent === "green" ? "text-green-400" : "text-ink")
+          (accent === "amber" ? "text-amber-300" : "text-ink")
         }
       >
         {tag}

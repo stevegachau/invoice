@@ -77,7 +77,9 @@ export function useInvoiceSettlement(
     return {
       relay: cachedRelay,
       source: { chainId: cachedRelay.chainId, amount: BigInt(cachedRelay.amount) },
-      complete: cachedRelay.mode === "same-chain",
+      // A cached cross-chain relay isn't complete until Relay confirms the
+      // Arc-side fill — the bridge-status effect below picks that up.
+      complete: false,
     };
   });
   const relayAttempts = useRef<Map<SupportedChainId, number>>(new Map());
@@ -176,13 +178,13 @@ export function useInvoiceSettlement(
           }
 
           if (outflows.length > 0) {
+            // An outbound transfer means the balance was already relayed —
+            // to the Relay deposit address on this origin chain, which
+            // bridges it to Arc. Recovered directly from chain history, so
+            // settlement state is re-derivable even with zero cached state.
             const first = outflows[0];
             const outAmount = first.args.value ?? 0n;
             const toAddr = first.args.to as Address;
-            const isSameChainDirect =
-              destination.type === "evm" &&
-              destination.chainId === chainId &&
-              toAddr.toLowerCase() === destination.address.toLowerCase();
 
             setState((prev) => {
               if (prev.relay) return prev;
@@ -190,20 +192,6 @@ export function useInvoiceSettlement(
                 ? prev
                 : { ...prev, source: { chainId, amount: outAmount } };
 
-              if (isSameChainDirect) {
-                return {
-                  ...withSource,
-                  relay: {
-                    status: "relayed",
-                    mode: "same-chain",
-                    chainId,
-                    address: invoiceAddress,
-                    amount: outAmount.toString(),
-                    relayTxHash: first.transactionHash ?? "",
-                  },
-                  complete: true,
-                };
-              }
               return {
                 ...withSource,
                 relay: {
@@ -278,11 +266,11 @@ export function useInvoiceSettlement(
     relayInFlight.current.delete(chainId);
   }
 
-  // Same-chain relays are already complete the moment they're detected.
-  // Cross-chain relays need Relay's own status polled until "success".
+  // Every relay is cross-chain (origin -> Arc), so poll Relay's status by
+  // deposit address until it reports the Arc-side fill as "success".
   useEffect(() => {
     if (!state.relay || state.relay.status !== "relayed") return;
-    if (state.relay.mode === "same-chain" || state.complete) return;
+    if (state.complete) return;
 
     let cancelled = false;
     const depositAddress = state.relay.bridgeDepositAddress;
